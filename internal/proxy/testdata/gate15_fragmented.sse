@@ -1,0 +1,14 @@
+event: message_start
+data: {"type":"message_start","message":{"usage":{"input_tokens":25,"output_tokens":1}}}
+
+: keepalive
+
+event: content_block_delta
+data: {"type":"content_block_delta","delta":{"text":"héllo wörld ✓"}}
+
+event: message_delta
+data: {"type":"message_delta","usage":{"output_tokens":42}}
+
+event: message_stop
+data: {"type":"message_stop"}
+

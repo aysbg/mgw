@@ -1,0 +1,4 @@
+/dist/
+/mgw
+*.test
+coverage.out

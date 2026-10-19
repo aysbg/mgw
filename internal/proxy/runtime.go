@@ -37,6 +37,8 @@ type Runtime struct {
 	CleanupTimeoutMS int `json:"cleanup_timeout_ms"`
 	// DefaultReserveTokens is reserved for a request that declares no output cap.
 	DefaultReserveTokens int64 `json:"default_reserve_tokens"`
+	// MaxReservationTokens bounds each reservation. Defaults to 8000 if omitted.
+	MaxReservationTokens int64 `json:"max_reservation_tokens"`
 }
 
 // LoadRuntime reads and validates a runtime file.
@@ -47,7 +49,7 @@ func LoadRuntime(file string) (*Runtime, error) {
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
-	var rt Runtime
+	rt := Runtime{MaxReservationTokens: defaultMaxReservationTokens}
 	if err := dec.Decode(&rt); err != nil {
 		return nil, fmt.Errorf("runtime: decode: %w", err)
 	}
@@ -64,6 +66,9 @@ func LoadRuntime(file string) (*Runtime, error) {
 	}
 	if rt.CleanupTimeoutMS <= 0 {
 		return nil, errors.New("runtime: cleanup_timeout_ms must be greater than zero")
+	}
+	if rt.MaxReservationTokens <= 0 {
+		return nil, errors.New("runtime: max_reservation_tokens must be greater than zero")
 	}
 	if err := provider.Validate(rt.Providers); err != nil {
 		return nil, fmt.Errorf("runtime: %w", err)
@@ -109,7 +114,8 @@ func Run(ctx context.Context, runtimeFile string, stderr io.Writer) error {
 	srv, err := New(Config{
 		Providers: rt.Providers, Authority: auth, Ledger: led, Audit: aw,
 		ReadyFile: rt.ReadyFile, CleanupTimeout: cleanup, DefaultReserveTokens: rt.DefaultReserveTokens,
-		Logger: slog.New(slog.NewJSONHandler(stderr, nil)),
+		MaxReservationTokens: rt.MaxReservationTokens,
+		Logger:               slog.New(slog.NewJSONHandler(stderr, nil)),
 	})
 	if err != nil {
 		return err

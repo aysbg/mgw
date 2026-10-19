@@ -27,6 +27,7 @@ Usage:
 
 Commands:
   serve      Run the gateway for one attempt or interactive session
+  authority  Emit a runtime and run token for one attempt
   exec       Run a client under a gateway
   init       Connect providers and generate the decision table
   providers  Add, list or test providers
@@ -40,7 +41,7 @@ Commands:
 
 func main() {
 	// Global flags (--config, --profile) precede the subcommand.
-	_, rest, err := cli.ParseGlobal(os.Args[1:])
+	g, rest, err := cli.ParseGlobal(os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mgw: %v\n", err)
 		os.Exit(2)
@@ -57,6 +58,10 @@ func main() {
 		fmt.Print(usage)
 	case "serve":
 		os.Exit(cli.Serve(rest[1:], os.Stdout, os.Stderr, version))
+	case "authority":
+		deps := cli.DefaultDeps()
+		deps.ConfigDir = g.ConfigDir
+		os.Exit(cli.Authority(rest[1:], os.Stdout, os.Stderr, deps))
 	case "init", "providers", "strategy", "matrix", "pricing", "doctor", "decide":
 		os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr, cli.DefaultDeps()))
 	case "exec":

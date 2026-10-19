@@ -40,13 +40,18 @@ func TestLoadRuntime(t *testing.T) {
 	if rt.ReadyFile != filepath.Join(dir, "ready.json") || rt.Providers[0].CredentialFile != filepath.Join(dir, "cred") {
 		t.Fatalf("relative paths not resolved against the runtime file: %+v", rt)
 	}
+	if rt.MaxReservationTokens != 8000 {
+		t.Fatalf("default reservation ceiling: %d", rt.MaxReservationTokens)
+	}
 	for name, mod := range map[string]func(map[string]any){
-		"unknown field": func(m map[string]any) { m["env"] = "X" },
-		"no authority":  func(m map[string]any) { delete(m, "authority_file") },
-		"no ready file": func(m map[string]any) { delete(m, "ready_file") },
-		"zero cleanup":  func(m map[string]any) { m["cleanup_timeout_ms"] = 0 },
-		"bad provider":  func(m map[string]any) { m["providers"].([]map[string]any)[0]["dialect"] = "gemini" },
-		"zero timeout":  func(m map[string]any) { m["providers"].([]map[string]any)[0]["timeouts"] = map[string]int{} },
+		"unknown field":    func(m map[string]any) { m["env"] = "X" },
+		"no authority":     func(m map[string]any) { delete(m, "authority_file") },
+		"no ready file":    func(m map[string]any) { delete(m, "ready_file") },
+		"zero cleanup":     func(m map[string]any) { m["cleanup_timeout_ms"] = 0 },
+		"zero ceiling":     func(m map[string]any) { m["max_reservation_tokens"] = 0 },
+		"negative ceiling": func(m map[string]any) { m["max_reservation_tokens"] = -1 },
+		"bad provider":     func(m map[string]any) { m["providers"].([]map[string]any)[0]["dialect"] = "gemini" },
+		"zero timeout":     func(m map[string]any) { m["providers"].([]map[string]any)[0]["timeouts"] = map[string]int{} },
 	} {
 		m := goodRuntime()
 		mod(m)
@@ -56,5 +61,17 @@ func TestLoadRuntime(t *testing.T) {
 	}
 	if _, err := LoadRuntime(filepath.Join(t.TempDir(), "nope")); err == nil || !strings.Contains(err.Error(), "runtime") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestLoadRuntimeReservationCeiling(t *testing.T) {
+	m := goodRuntime()
+	m["max_reservation_tokens"] = 1234
+	rt, err := LoadRuntime(writeRuntime(t, m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt.MaxReservationTokens != 1234 {
+		t.Fatalf("configured reservation ceiling: %d", rt.MaxReservationTokens)
 	}
 }

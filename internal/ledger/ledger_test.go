@@ -75,6 +75,48 @@ func TestSettleUnmeasuredIsKept(t *testing.T) {
 	}
 }
 
+func TestRemaining(t *testing.T) {
+	l := open(t, 100)
+	check := func(runID string, want int64) {
+		t.Helper()
+		got, err := l.Remaining(runID)
+		if err != nil || got != want {
+			t.Fatalf("remaining(%q) = %d, %v; want %d", runID, got, err, want)
+		}
+	}
+	check("run", 100)
+	if err := l.Reserve("a", "run", 60); err != nil {
+		t.Fatal(err)
+	}
+	check("run", 40)
+	check("other", 100)
+	if err := l.Settle("a", "run", 25, true); err != nil {
+		t.Fatal(err)
+	}
+	check("run", 75)
+	if err := l.Reserve("b", "run", 30); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Settle("b", "run", 30, false); err != nil {
+		t.Fatal(err)
+	}
+	check("run", 45)
+	if err := l.Reserve("c", "run", 45); err != nil {
+		t.Fatal(err)
+	}
+	check("run", 0)
+	if err := l.Settle("c", "run", 50, true); err != nil {
+		t.Fatal(err)
+	}
+	check("run", -5)
+	if tot, err := l.Totals("run"); err != nil || tot != (Totals{Settled: 75, Uncertain: 30}) {
+		t.Fatalf("over-budget truth: %+v, %v", tot, err)
+	}
+	if _, err := l.Remaining(""); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("empty run: %v", err)
+	}
+}
+
 func TestInvalidArguments(t *testing.T) {
 	l := open(t, 10)
 	for _, err := range []error{
@@ -152,6 +194,9 @@ func TestTimeoutWhenLockHeld(t *testing.T) {
 	}
 	if err := l.Settle("a", "run", 10, true); !errors.Is(err, ErrTimeout) {
 		t.Fatalf("want settle_timeout, got %v", err)
+	}
+	if _, err := l.Remaining("run"); !errors.Is(err, ErrTimeout) {
+		t.Fatalf("remaining while locked: want settle_timeout, got %v", err)
 	}
 	if err := holder.Close(); err != nil {
 		t.Fatal(err)

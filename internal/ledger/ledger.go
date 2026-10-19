@@ -133,6 +133,20 @@ func (l *Ledger) Totals(runID string) (Totals, error) {
 	return out, err
 }
 
+// Remaining reads the run's budget minus settled, uncertain and reserved usage.
+// It can be negative after measured usage exceeds the budget. This is a
+// snapshot: a later Reserve still checks the budget under the file lock.
+func (l *Ledger) Remaining(runID string) (int64, error) {
+	if runID == "" {
+		return 0, fmt.Errorf("%w: remaining", ErrInvalid)
+	}
+	totals, err := l.Totals(runID)
+	if err != nil {
+		return 0, err
+	}
+	return l.budget - totals.Spent(), nil
+}
+
 func (s *state) run(id string) *runState {
 	r, ok := s.Runs[id]
 	if !ok {

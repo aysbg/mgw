@@ -52,6 +52,8 @@ type Config struct {
 	CleanupTimeout time.Duration
 	// DefaultReserveTokens is reserved when a request declares no output cap.
 	DefaultReserveTokens int64
+	// MaxReservationTokens bounds each reservation. Zero defaults to 8000.
+	MaxReservationTokens int64
 	Logger               *slog.Logger
 
 	// Now is a test seam for the clock.
@@ -98,6 +100,12 @@ func New(cfg Config) (*Server, error) {
 	if cfg.DefaultReserveTokens <= 0 {
 		cfg.DefaultReserveTokens = defaultReserveTokens
 	}
+	if cfg.MaxReservationTokens == 0 {
+		cfg.MaxReservationTokens = defaultMaxReservationTokens
+	}
+	if cfg.MaxReservationTokens < 0 {
+		return nil, errors.New("proxy: max_reservation_tokens must be greater than zero")
+	}
 	if cfg.Addr == "" {
 		cfg.Addr = "127.0.0.1:0"
 	}
@@ -134,6 +142,30 @@ func New(cfg Config) (*Server, error) {
 // defaultReserveTokens is used when neither the request nor the runtime file
 // declares an output cap.
 const defaultReserveTokens = 4096
+
+const defaultMaxReservationTokens = 8000
+
+// reserveBudget caps a request's reservation to the remaining budget and the
+// per-request ceiling. It does not cap measured usage at settlement.
+func (s *Server) reserveBudget(id, runID string, limit int64) (int64, error) {
+	for {
+		remaining, err := s.cfg.Ledger.Remaining(runID)
+		if err != nil {
+			return 0, err
+		}
+		if remaining <= 0 {
+			return 0, ledger.ErrBudgetExhausted
+		}
+		reserve := min(limit, remaining, s.cfg.MaxReservationTokens)
+		err = s.cfg.Ledger.Reserve(id, runID, reserve)
+		if errors.Is(err, ledger.ErrBudgetExhausted) {
+			// Another request reserved tokens after our snapshot. Recheck and
+			// shrink the reservation; refuse only once no budget remains.
+			continue
+		}
+		return reserve, err
+	}
+}
 
 func sleepCtx(ctx context.Context, d time.Duration) error {
 	if d <= 0 {
@@ -469,7 +501,8 @@ func (s *Server) serveRequest(tw *trackedWriter, r *http.Request, st *reqState) 
 	if reserve <= 0 {
 		reserve = s.cfg.DefaultReserveTokens
 	}
-	if err := s.cfg.Ledger.Reserve(st.id, auth.RunID, reserve); err != nil {
+	reserve, err = s.reserveBudget(st.id, auth.RunID, reserve)
+	if err != nil {
 		switch {
 		case errors.Is(err, ledger.ErrBudgetExhausted):
 			s.reject(tw, st, http.StatusForbidden, audit.FailBudgetExhausted)

@@ -110,16 +110,18 @@ type harness struct {
 }
 
 type harnessOpts struct {
-	concurrency int
-	budget      int64
-	timeouts    provider.Timeouts
-	expires     time.Time
-	dial        func(ctx context.Context, network, addr string) (net.Conn, error)
-	providers   func(upstreamURL string, credFile string) []provider.Provider
-	panicHook   func(string)
-	handler     http.HandlerFunc
-	cleanup     time.Duration
-	tls         *tls.Config
+	concurrency    int
+	budget         int64
+	defaultReserve int64
+	maxReservation int64
+	timeouts       provider.Timeouts
+	expires        time.Time
+	dial           func(ctx context.Context, network, addr string) (net.Conn, error)
+	providers      func(upstreamURL string, credFile string) []provider.Provider
+	panicHook      func(string)
+	handler        http.HandlerFunc
+	cleanup        time.Duration
+	tls            *tls.Config
 }
 
 func newToken() string { return base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x5a}, 33)) }
@@ -168,6 +170,7 @@ func newHarness(t *testing.T, mod func(*harnessOpts)) *harness {
 	srv, err := New(Config{
 		Providers: provs, Authority: auth, Ledger: led, Audit: aw,
 		ReadyFile: filepath.Join(dir, "ready.json"), CleanupTimeout: o.cleanup,
+		DefaultReserveTokens: o.defaultReserve, MaxReservationTokens: o.maxReservation,
 		DialContext: o.dial, TLSConfig: o.tls, panicHook: o.panicHook,
 		Sleep: func(_ context.Context, d time.Duration) error { h.sleeps = append(h.sleeps, d); return nil },
 	})

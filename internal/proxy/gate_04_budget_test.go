@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -159,8 +160,8 @@ func TestGate04_PolicyRejectionNeverReserves(t *testing.T) {
 	}
 }
 
-// TestGate04_ConcurrentRequestsOnABudgetThatFitsOneAdmitExactlyOne: budget 150,
-// two requests of 100 each, both allowed to run at once. One is admitted and
+// TestGate04_ConcurrentRequestsOnABudgetThatFitsOneAdmitExactlyOne: budget 100,
+// two requests with caps of 1000, both allowed to run at once. One is admitted and
 // held at the upstream; the other fails budget_exhausted without any upstream
 // call. The loser is read before the winner is released, so the two were
 // genuinely concurrent.
@@ -169,7 +170,7 @@ func TestGate04_ConcurrentRequestsOnABudgetThatFitsOneAdmitExactlyOne(t *testing
 	release := make(chan struct{})
 	var once sync.Once
 	h := newHarness(t, func(o *harnessOpts) {
-		o.budget = 150
+		o.budget = 100
 		o.concurrency = 2
 		o.handler = func(w http.ResponseWriter, _ *http.Request) {
 			once.Do(func() { close(arrived) })
@@ -188,7 +189,7 @@ func TestGate04_ConcurrentRequestsOnABudgetThatFitsOneAdmitExactlyOne(t *testing
 	results := make(chan result, 2)
 	for range 2 {
 		go func() {
-			req, err := newTestRequest(http.MethodPost, h.url+chatPath, strings.NewReader(chatBody))
+			req, err := newTestRequest(http.MethodPost, h.url+chatPath, strings.NewReader(strings.Replace(chatBody, `"max_tokens":100`, `"max_tokens":1000`, 1)))
 			if err != nil {
 				results <- result{err: err}
 				return
@@ -248,5 +249,257 @@ func TestGate04_ConcurrentRequestsOnABudgetThatFitsOneAdmitExactlyOne(t *testing
 	}
 	if tot := h.totals(); tot.Settled != 18 || tot.Reserved != 0 || tot.Uncertain != 0 {
 		t.Fatalf("ledger: %+v", tot)
+	}
+}
+
+func TestGate04_ReservationCappedByRemainingBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		budget         int64
+		cap            int64
+		priorUsage     int64
+		reserved       int64
+		defaultReserve int64
+		ceiling        int64
+	}{
+		{name: "large output cap", budget: 100000, cap: 1000000, reserved: 8000},
+		{name: "remaining below ceiling", budget: 5000, cap: 1000000, reserved: 5000},
+		{name: "default capped", budget: 100, cap: 0, reserved: 100},
+		{name: "default fits", budget: 100000, cap: 0, reserved: defaultReserveTokens},
+		{name: "configured ceiling", budget: 100000, cap: 1000000, ceiling: 2000, reserved: 2000},
+		{name: "default above ceiling", budget: 100000, cap: 0, defaultReserve: 10000, ceiling: 2000, reserved: 2000},
+		{name: "negative cap uses bounded default", budget: 100000, cap: -1, defaultReserve: 10000, ceiling: 2000, reserved: 2000},
+		{name: "measured usage exceeds ceiling", budget: 100000, cap: 1000000, ceiling: 100, reserved: 100},
+		{name: "settled usage counts", budget: 1000, cap: 1000000, priorUsage: 400, reserved: 600},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			arrived := make(chan struct{})
+			release := make(chan struct{})
+			var once sync.Once
+			var releaseOnce sync.Once
+			releaseRequest := func() { releaseOnce.Do(func() { close(release) }) }
+			h := newHarness(t, func(o *harnessOpts) {
+				o.budget = tc.budget
+				o.defaultReserve, o.maxReservation = tc.defaultReserve, tc.ceiling
+				o.handler = func(w http.ResponseWriter, _ *http.Request) {
+					once.Do(func() { close(arrived) })
+					select {
+					case <-release:
+					case <-time.After(gate04Wait):
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = io.WriteString(w, `{"usage":{"prompt_tokens":200,"completion_tokens":300}}`)
+				}
+			})
+			defer releaseRequest()
+			if tc.priorUsage > 0 {
+				if err := h.led.Reserve("prior", testRunID, tc.priorUsage); err != nil {
+					t.Fatal(err)
+				}
+				if err := h.led.Settle("prior", testRunID, tc.priorUsage, true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			type result struct {
+				status int
+				err    error
+			}
+			done := make(chan result, 1)
+			body := fmt.Sprintf(`{"model":"gpt-6-astra","max_tokens":%d}`, tc.cap)
+			go func() {
+				req, err := newTestRequest(http.MethodPost, h.url+chatPath, strings.NewReader(body))
+				if err != nil {
+					done <- result{err: err}
+					return
+				}
+				req.Header.Set("Authorization", "Bearer "+h.token)
+				resp, err := h.client.Do(req)
+				if err != nil {
+					done <- result{err: err}
+					return
+				}
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+				done <- result{status: resp.StatusCode}
+			}()
+			select {
+			case <-arrived:
+			case r := <-done:
+				t.Fatalf("request not admitted: status %d, err %v", r.status, r.err)
+			case <-time.After(gate04Wait):
+				t.Fatal("request did not reach upstream")
+			}
+			if tot := h.totals(); tot != (ledger.Totals{Reserved: tc.reserved, Settled: tc.priorUsage}) {
+				t.Fatalf("in-flight totals: %+v", tot)
+			}
+			releaseRequest()
+			select {
+			case r := <-done:
+				if r.err != nil || r.status != http.StatusOK {
+					t.Fatalf("response: status %d, err %v", r.status, r.err)
+				}
+			case <-time.After(gate04Wait):
+				t.Fatal("response did not finish")
+			}
+			h.idle()
+			if tot := h.totals(); tot != (ledger.Totals{Settled: tc.priorUsage + 500}) {
+				t.Fatalf("settled totals: %+v", tot)
+			}
+		})
+	}
+}
+
+func TestGate04_DisconnectKeepsBoundedReservation(t *testing.T) {
+	upstreamCancelled := make(chan struct{})
+	h := newHarness(t, func(o *harnessOpts) {
+		o.budget = 100000
+		o.handler = func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, "data: {\"delta\":\"tick\"}\n\n")
+			_ = http.NewResponseController(w).Flush()
+			<-r.Context().Done()
+			close(upstreamCancelled)
+		}
+	})
+	const body = `{"model":"gpt-6-astra","max_tokens":1000000,"stream":true}`
+	resp := postStream(t, h, chatPath, body)
+	defer func() { _ = resp.Body.Close() }()
+	first := make([]byte, 16)
+	if _, err := io.ReadFull(resp.Body, first); err != nil {
+		t.Fatal(err)
+	}
+	if tot := h.totals(); tot != (ledger.Totals{Reserved: 8000}) {
+		t.Fatalf("in-flight reservation must be bounded: %+v", tot)
+	}
+	_ = resp.Body.Close()
+	waitFor(t, upstreamCancelled, "upstream cancellation after disconnect")
+	done := make(chan struct{})
+	go func() { h.idle(); close(done) }()
+	waitFor(t, done, "disconnect settlement")
+	if tot := h.totals(); tot != (ledger.Totals{Uncertain: 8000}) {
+		t.Fatalf("disconnect must charge only the reservation taken: %+v", tot)
+	}
+	if rec := h.lastRecord(); rec.FailureCode != audit.FailClientDisconnect || rec.UsageStatus != audit.UsageUnknown {
+		t.Fatalf("audit: %+v", rec)
+	}
+	h.upstream.handler.Store(http.HandlerFunc(okHandler))
+	next, response := h.do(chatPath, body, nil)
+	if next.StatusCode != http.StatusOK {
+		t.Fatalf("next request must still succeed: %d %s", next.StatusCode, response)
+	}
+	h.idle()
+	if tot := h.totals(); tot != (ledger.Totals{Uncertain: 8000, Settled: 18}) {
+		t.Fatalf("ledger after next request: %+v", tot)
+	}
+}
+
+func TestGate04_MeasuredOverBudgetResponseDelivered(t *testing.T) {
+	const response = `{"id":"delivered","usage":{"prompt_tokens":200,"completion_tokens":300}}`
+	h := newHarness(t, func(o *harnessOpts) {
+		o.budget = 100
+		o.handler = func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, response)
+		}
+	})
+	resp, body := h.do(chatPath, chatBody, nil)
+	if resp.StatusCode != http.StatusOK || string(body) != response {
+		t.Fatalf("response: %d %s", resp.StatusCode, body)
+	}
+	rec := h.lastRecord()
+	if rec.FailureCode != "" || rec.UsageStatus != audit.UsageMeasured || rec.CommitState != audit.CommitCommitted || i64v(rec.InputTokens)+i64v(rec.OutputTokens) != 500 {
+		t.Fatalf("audit: %+v", rec)
+	}
+	if tot := h.totals(); tot != (ledger.Totals{Settled: 500}) {
+		t.Fatalf("measured truth not settled: %+v", tot)
+	}
+	resp, body = h.do(chatPath, chatBody, nil)
+	if resp.StatusCode != http.StatusForbidden || errCode(t, body) != audit.FailBudgetExhausted {
+		t.Fatalf("next request: %d %s", resp.StatusCode, body)
+	}
+	if h.upstream.count() != 1 || h.lastRecord().UpstreamAttempts != 0 {
+		t.Fatal("exhausted request reached upstream")
+	}
+}
+
+func TestGate04_ConcurrentRequestsUseRemainingBudget(t *testing.T) {
+	const requests = 12
+	arrived := make(chan struct{}, requests)
+	release := make(chan struct{})
+	h := newHarness(t, func(o *harnessOpts) {
+		o.budget = 150
+		o.concurrency = requests
+		o.handler = func(w http.ResponseWriter, _ *http.Request) {
+			arrived <- struct{}{}
+			select {
+			case <-release:
+			case <-time.After(gate04Wait):
+			}
+			okHandler(w, nil)
+		}
+	})
+	var once sync.Once
+	releaseRequests := func() { once.Do(func() { close(release) }) }
+	defer releaseRequests()
+	type result struct {
+		status int
+		body   []byte
+		err    error
+	}
+	results := make(chan result, requests)
+	start := make(chan struct{})
+	for range requests {
+		go func() {
+			<-start
+			req, err := newTestRequest(http.MethodPost, h.url+chatPath, strings.NewReader(chatBody))
+			if err != nil {
+				results <- result{err: err}
+				return
+			}
+			req.Header.Set("Authorization", "Bearer "+h.token)
+			resp, err := h.client.Do(req)
+			if err != nil {
+				results <- result{err: err}
+				return
+			}
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			results <- result{status: resp.StatusCode, body: body}
+		}()
+	}
+	close(start)
+	for range 2 {
+		waitFor(t, arrived, "a request to use the remaining budget")
+	}
+	for range requests - 2 {
+		select {
+		case r := <-results:
+			if r.err != nil || r.status != http.StatusForbidden || errCode(t, r.body) != audit.FailBudgetExhausted {
+				t.Fatalf("refused request: status %d, err %v, body %s", r.status, r.err, r.body)
+			}
+		case <-time.After(gate04Wait):
+			t.Fatal("exhausted request did not finish")
+		}
+	}
+	if tot := h.totals(); tot != (ledger.Totals{Reserved: 150}) {
+		t.Fatalf("expected reservations of 100 and 50: %+v", tot)
+	}
+	if h.upstream.count() != 2 {
+		t.Fatalf("upstream saw %d requests, want 2", h.upstream.count())
+	}
+	releaseRequests()
+	for range 2 {
+		select {
+		case r := <-results:
+			if r.err != nil || r.status != http.StatusOK {
+				t.Fatalf("admitted request: status %d, err %v", r.status, r.err)
+			}
+		case <-time.After(gate04Wait):
+			t.Fatal("admitted request did not finish")
+		}
+	}
+	h.idle()
+	if tot := h.totals(); tot != (ledger.Totals{Settled: 36}) {
+		t.Fatalf("settled totals: %+v", tot)
 	}
 }

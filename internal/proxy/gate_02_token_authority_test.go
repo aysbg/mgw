@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aysbg/mgw/internal/audit"
+	"github.com/aysbg/mgw/internal/ledger"
 	"github.com/aysbg/mgw/internal/policy"
 )
 
@@ -35,7 +36,6 @@ func TestGate02_TokenAuthority(t *testing.T) {
 		{"body over cap", chatPath, oversize, nil, nil, 413, "malformed"},
 		{"body is not json", chatPath, `not json`, nil, nil, 400, "malformed"},
 		{"no model field", chatPath, `{"messages":[]}`, nil, nil, 400, "malformed"},
-		{"budget exhausted", chatPath, chatBody, nil, func(o *harnessOpts) { o.budget = 99 }, 403, "budget_exhausted"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -55,6 +55,27 @@ func TestGate02_TokenAuthority(t *testing.T) {
 				t.Fatalf("ledger touched by a denied request: %+v", tot)
 			}
 		})
+	}
+}
+
+func TestGate02_BudgetExhausted(t *testing.T) {
+	h := newHarness(t, func(o *harnessOpts) { o.budget = 99 })
+	// An output cap above the budget is allowed; only a fully used budget denies.
+	if err := h.led.Reserve("held", testRunID, 99); err != nil {
+		t.Fatal(err)
+	}
+	resp, body := h.do(chatPath, chatBody, nil)
+	if resp.StatusCode != http.StatusForbidden || errCode(t, body) != audit.FailBudgetExhausted {
+		t.Fatalf("got %d %s, want 403 budget_exhausted", resp.StatusCode, body)
+	}
+	if h.upstream.count() != 0 {
+		t.Fatal("budget-exhausted request reached upstream")
+	}
+	if rec := h.lastRecord(); rec.FailureCode != audit.FailBudgetExhausted || rec.UpstreamAttempts != 0 || rec.CommitState != audit.CommitNone {
+		t.Fatalf("audit: %+v", rec)
+	}
+	if tot := h.totals(); tot != (ledger.Totals{Reserved: 99}) {
+		t.Fatalf("denied request changed ledger: %+v", tot)
 	}
 }
 

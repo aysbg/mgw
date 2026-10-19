@@ -40,6 +40,23 @@ internal/audit   metadata-only audit records
 docs/gates.md    gate to test mapping
 ```
 
+## Decision layer
+
+`mgw decide` asks a typed-decision model (Clef via Ollama Cloud, or Jev) for the
+complexity inputs the router takes. What it supplies reliably, measured on live
+responses:
+
+| input | reliability | when it degrades |
+|---|---|---|
+| `type` | high (top probability 0.85–0.94, margin 0.79–0.93) | a rejected type falls the whole classification back to the caller |
+| risk flags | high, and fail-safe | a flag between 0.40 and 0.70 is **set** and recorded in `ambiguous_flags`, never treated as absent |
+| `size` | best-effort | a hedged size (M vs L, margin ~0.03) leaves `size` empty and sets `size_fallback`; the caller supplies it |
+| `scout` | same rule as a flag | |
+
+A degraded size is not a failure: it is the normal outcome on non-trivial work,
+and the run record says so. The reported `confidence` field is telemetry and
+never decides anything.
+
 ## Security invariants
 
 - Provider keys never enter a lane. The lane holds a run-scoped token only.

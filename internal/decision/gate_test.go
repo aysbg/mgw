@@ -46,7 +46,8 @@ func TestCapturedFullSystemonePassesCalibration(t *testing.T) {
 		t.Fatal(err)
 	}
 	if res.Fallback || res.FallbackReason != "" || res.Type != "migration" || res.Size != "M" ||
-		!slices.Equal(res.RiskFlags, []string{"schema"}) || res.Scout || res.Confidence != 0.7323 {
+		!slices.Equal(res.RiskFlags, []string{"schema"}) || res.Scout || res.Confidence != 0.7323 ||
+		len(res.AmbiguousFlags) != 0 || res.SizeFallback {
 		t.Fatalf("captured full response rejected or changed: %+v", res)
 	}
 }
@@ -74,40 +75,73 @@ func TestGateChoiceCalibration(t *testing.T) {
 				}
 				a.Probabilities = map[string]float64{a.Choice: tc.top, runner: tc.runner}
 				res := runGate(resp, canonicalChangeTypes, canonicalSizes)
+				if question == qSize {
+					wantSize := "M"
+					if tc.reason != "" {
+						wantSize = ""
+					}
+					if res.Fallback || res.FallbackReason != "" || res.Size != wantSize ||
+						res.SizeFallback != (tc.reason != "") || res.Type != "bugfix" ||
+						!slices.Equal(res.RiskFlags, []string{"auth", "concurrency"}) {
+						t.Fatalf("size uncertainty must preserve other inputs: %+v", res)
+					}
+					return
+				}
 				if res.Fallback != (tc.reason != "") || res.FallbackReason != tc.reason {
 					t.Fatalf("result = %+v; want reason %q", res, tc.reason)
+				}
+				if res.Fallback && (res.Type != "" || res.Size != "" || res.RiskFlags != nil ||
+					res.Scout || res.Confidence != 0 || res.SizeFallback || len(res.AmbiguousFlags) != 0) {
+					t.Fatalf("type rejection must discard all inputs: %+v", res)
 				}
 			})
 		}
 	}
 }
 
-func TestGateNoulAmbiguousBand(t *testing.T) {
+func TestGateSizeBestEffortPreservesTypeAndFlags(t *testing.T) {
+	resp := gateFixture(nil)
+	resp.Answers[qChangeType].Choice = "migration"
+	resp.Answers[qChangeType].Probabilities = map[string]float64{"migration": 0.90, "feature": 0.05}
+	resp.Answers[qSize].Probabilities = map[string]float64{"M": 0.48, "L": 0.45, "S": 0.07}
+	resp.Answers[qSchemaRisk].Probability = 0.607
+	resp.Answers[qNeedsScout].Probability = 0.55
+	res := runGate(resp, canonicalChangeTypes, canonicalSizes)
+	if res.Fallback || res.FallbackReason != "" || res.Type != "migration" || res.Size != "" || !res.SizeFallback ||
+		!slices.Equal(res.RiskFlags, []string{"schema", "auth", "concurrency"}) || !res.Scout ||
+		!slices.Equal(res.AmbiguousFlags, []string{"schema", "scout"}) {
+		t.Fatalf("size uncertainty must preserve type and flags: %+v", res)
+	}
+}
+
+func TestGateNoulTriState(t *testing.T) {
 	for _, q := range canonicalQuestions {
 		if q.Body.Type != kindNoul {
 			continue
 		}
-		for _, p := range []float64{0, 0.39, 0.3999, 0.40, 0.55, 0.6999, 0.70, 0.95} {
+		for _, p := range []float64{0, 0.39, 0.3999, 0.40, 0.55, 0.607, 0.6999, 0.70, 0.95} {
 			t.Run(fmt.Sprintf("%s/%g", q.Name, p), func(t *testing.T) {
 				resp := gateFixture(nil)
 				resp.Answers[q.Name].Probability = p
 				res := runGate(resp, canonicalChangeTypes, canonicalSizes)
-				if p >= 0.40 && p < 0.70 {
-					if !res.Fallback || res.FallbackReason != ReasonLowConfidenceFlag || res.Type != "" ||
-						res.Size != "" || res.RiskFlags != nil || res.Scout || res.Confidence != 0 {
-						t.Fatalf("ambiguous noul must discard all inputs: %+v", res)
-					}
-					return
-				}
-				if res.Fallback || res.Type != "bugfix" || res.Size != "M" {
-					t.Fatalf("clear noul must accept: %+v", res)
+				if res.Fallback || res.FallbackReason != "" || res.Type != "bugfix" || res.Size != "M" || res.SizeFallback {
+					t.Fatalf("noul uncertainty must not discard type or size: %+v", res)
 				}
 				set := res.Scout
+				name := "scout"
 				if q.Name != qNeedsScout {
-					set = slices.Contains(res.RiskFlags, riskFlag(q.Name))
+					name = riskFlag(q.Name)
+					set = slices.Contains(res.RiskFlags, name)
 				}
-				if set != (p >= 0.70) {
+				if set != (p >= 0.40) {
 					t.Fatalf("noul %g: incorrect flag in %+v", p, res)
+				}
+				var wantAmbiguous []string
+				if p >= 0.40 && p < 0.70 {
+					wantAmbiguous = []string{name}
+				}
+				if !slices.Equal(res.AmbiguousFlags, wantAmbiguous) {
+					t.Fatalf("noul %g: ambiguity = %v; want %v", p, res.AmbiguousFlags, wantAmbiguous)
 				}
 			})
 		}
@@ -115,19 +149,26 @@ func TestGateNoulAmbiguousBand(t *testing.T) {
 }
 
 func TestGateReportedConfidenceIsTelemetryOnly(t *testing.T) {
-	for _, reason := range []string{"", ReasonLowConfidence, ReasonLowMargin, ReasonLowConfidenceFlag} {
-		t.Run("reason="+reason, func(t *testing.T) {
+	for _, scenario := range []string{"accepted", ReasonLowConfidence, ReasonLowMargin, "size floor", "size margin", "ambiguous scout"} {
+		t.Run(scenario, func(t *testing.T) {
 			var first Result
 			for i, confidence := range []float64{0, 0.1, 0.2584, 0.99} {
 				resp := gateFixture(nil)
 				resp.Answers[qChangeType].Confidence = confidence
 				resp.Answers[qSize].Confidence = confidence
-				switch reason {
+				reason := ""
+				switch scenario {
 				case ReasonLowConfidence:
-					resp.Answers[qSize].Probabilities = map[string]float64{"M": 0.50, "S": 0.10}
+					resp.Answers[qChangeType].Probabilities = map[string]float64{"bugfix": 0.50, "feature": 0.10}
+					reason = ReasonLowConfidence
 				case ReasonLowMargin:
+					resp.Answers[qChangeType].Probabilities = map[string]float64{"bugfix": 0.62, "feature": 0.55}
+					reason = ReasonLowMargin
+				case "size floor":
+					resp.Answers[qSize].Probabilities = map[string]float64{"M": 0.50, "S": 0.10}
+				case "size margin":
 					resp.Answers[qSize].Probabilities = map[string]float64{"M": 0.62, "S": 0.55}
-				case ReasonLowConfidenceFlag:
+				case "ambiguous scout":
 					resp.Answers[qNeedsScout].Probability = 0.55
 				}
 				res := runGate(resp, canonicalChangeTypes, canonicalSizes)
@@ -171,7 +212,7 @@ func TestChoiceFloorConfig(t *testing.T) {
 	cfg = gateConfig()
 	cfg.ChoiceFloor = 0.75
 	res := applyGate(cfg, resp, canonicalChangeTypes, canonicalSizes, BackendOllama, "clef-flash", 1)
-	if !res.Fallback || res.FallbackReason != ReasonLowConfidence {
+	if res.Fallback || res.FallbackReason != "" || res.Type != "migration" || res.Size != "" || !res.SizeFallback {
 		t.Fatalf("custom choice floor ignored: %+v", res)
 	}
 }
@@ -350,6 +391,19 @@ func TestGateHostileResponsesRejected(t *testing.T) {
 		}
 		if res.Size != "" {
 			t.Errorf("a hostile label must not pass: %+v", res)
+		}
+	})
+	t.Run("deterministic rejection clears degradation metadata", func(t *testing.T) {
+		resp := gateFixture(nil)
+		resp.Answers[qSize].Choice = "XL"
+		resp.Answers[qSize].Probabilities = map[string]float64{"XL": 0.48, "M": 0.45}
+		resp.Answers[qSchemaRisk].Probability = 0.607
+		resp.Answers[qNeedsScout].Probability = 0.55
+		// Even a custom offer cannot bypass the final canonical-label check.
+		res := runGate(resp, canonicalChangeTypes, append(slices.Clone(canonicalSizes), "XL"))
+		if !res.Fallback || res.FallbackReason != ReasonBadLabel || res.Type != "" || res.Size != "" ||
+			res.RiskFlags != nil || res.Scout || res.Confidence != 0 || res.SizeFallback || res.AmbiguousFlags != nil {
+			t.Fatalf("a hostile label must discard all inputs and degradation metadata: %+v", res)
 		}
 	})
 	t.Run("injection cannot bypass the margin rule", func(t *testing.T) {

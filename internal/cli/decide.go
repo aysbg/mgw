@@ -87,8 +87,8 @@ func Decide(args []string, stdout, stderr io.Writer, deps Deps) int {
 			ChoiceFloor     float64 `json:"choice_floor"`
 		}{result, dc.ConfidenceFloor, dc.ChoiceFloor})
 	} else {
-		_, err = fmt.Fprintf(stdout, "type: %s\nsize: %s\nrisk_flags: %v\nscout: %t\nconfidence: %.2f\nbackend: %s\ndecision_model: %s\nlatency_ms: %d\nconfidence_floor: %g\nchoice_floor: %g\n",
-			result.Type, result.Size, result.RiskFlags, result.Scout, result.Confidence, result.Backend, result.DecisionModel, result.LatencyMS, dc.ConfidenceFloor, dc.ChoiceFloor)
+		_, err = fmt.Fprintf(stdout, "type: %s\nsize: %s\nrisk_flags: %v\nscout: %t\nambiguous_flags: %v\nsize_fallback: %t\nconfidence: %.2f\nbackend: %s\ndecision_model: %s\nlatency_ms: %d\nconfidence_floor: %g\nchoice_floor: %g\n",
+			result.Type, result.Size, result.RiskFlags, result.Scout, result.AmbiguousFlags, result.SizeFallback, result.Confidence, result.Backend, result.DecisionModel, result.LatencyMS, dc.ConfidenceFloor, dc.ChoiceFloor)
 		if err == nil && result.Fallback {
 			_, err = fmt.Fprintf(stdout, "fallback_reason: %s\n", result.FallbackReason)
 		}

@@ -202,18 +202,18 @@ func TestCapturedSystemoneNoulPassesGate(t *testing.T) {
 
 func TestNoulWireFieldsAndFloor(t *testing.T) {
 	cases := []struct {
-		name     string
-		fields   string
-		want     float64
-		fires    bool
-		fallback bool
+		name      string
+		fields    string
+		want      float64
+		fires     bool
+		ambiguous bool
 	}{
 		{"noul above floor", `"noul":0.9487`, 0.9487, true, false},
 		{"noul at floor", `"noul":0.70`, 0.70, true, false},
-		{"noul below floor", `"noul":0.6999`, 0.6999, false, true},
+		{"noul below floor", `"noul":0.6999`, 0.6999, true, true},
 		{"legacy probability", `"probability":0.85`, 0.85, true, false},
 		{"legacy below floor", `"probability":0.05`, 0.05, false, false},
-		{"legacy ambiguous", `"probability":0.55`, 0.55, false, true},
+		{"legacy ambiguous", `"probability":0.55`, 0.55, true, true},
 		{"noul wins", `"noul":0.95,"probability":0.05`, 0.95, true, false},
 		{"zero noul wins", `"probability":0.95,"noul":0`, 0, false, false},
 		{"secondary field is not read", `"noul":0.95,"probability":"unused"`, 0.95, true, false},
@@ -235,17 +235,16 @@ func TestNoulWireFieldsAndFloor(t *testing.T) {
 				resp.Answers[q.Name] = &answer
 			}
 			res := runGate(resp, canonicalChangeTypes, canonicalSizes)
-			if tc.fallback {
-				if !res.Fallback || res.FallbackReason != ReasonLowConfidenceFlag || res.Type != "" || res.Size != "" || res.RiskFlags != nil || res.Scout {
-					t.Fatalf("ambiguous noul must discard the whole classification: %+v", res)
-				}
-				return
+			var wantAmbiguous []string
+			if tc.ambiguous {
+				wantAmbiguous = append(slices.Clone(canonicalFlags), "scout")
 			}
 			var wantFlags []string
 			if tc.fires {
 				wantFlags = canonicalFlags
 			}
-			if res.Fallback || !slices.Equal(res.RiskFlags, wantFlags) || res.Scout != tc.fires {
+			if res.Fallback || !slices.Equal(res.RiskFlags, wantFlags) || res.Scout != tc.fires ||
+				!slices.Equal(res.AmbiguousFlags, wantAmbiguous) {
 				t.Fatalf("verdict = %+v; want flags %v, scout %t", res, wantFlags, tc.fires)
 			}
 		})
@@ -700,8 +699,8 @@ func TestResultJSONHasNoSeatStrategyOrRoutedModel(t *testing.T) {
 	}
 	slices.Sort(got)
 	want := []string{
-		"backend", "confidence", "decision_model", "fallback", "fallback_reason",
-		"latency_ms", "risk_flags", "scout", "size", "type",
+		"ambiguous_flags", "backend", "confidence", "decision_model", "fallback", "fallback_reason",
+		"latency_ms", "risk_flags", "scout", "size", "size_fallback", "type",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("Result JSON keys = %v; want %v", got, want)

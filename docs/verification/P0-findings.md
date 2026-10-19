@@ -1,5 +1,8 @@
 # P0 verification findings
 
+Tracked as MGW-001 and MGW-002 in `docs/issues/REGISTER.md`, which is the
+canonical ledger. This file holds the evidence.
+
 Verification by the hub against the merged P0 tree, 2026-10-19. The lane's own
 report was not taken as evidence; every claim below was reproduced here.
 
@@ -24,7 +27,7 @@ dispatch through the gateway with no provider key in its configuration.
 
 ## Two defects found
 
-### D1 — streaming usage is unknown for the primary client
+### D1 — streaming usage is unknown for the primary client (MGW-001)
 
 Audit record from that successful opencode dispatch:
 
@@ -51,7 +54,7 @@ Options, to be decided in P1:
 3. Ask the client to request usage. opencode offers no config switch for this
    that we have verified.
 
-### D2 — a completed stream is recorded as a client disconnect
+### D2 — a completed stream is recorded as a client disconnect (MGW-002)
 
 Both opencode requests ended `failure_code: client_disconnect` while the client
 received a complete answer and printed `OK`. After the final event the client

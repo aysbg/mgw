@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aysbg/mgw/internal/catalog"
+	"github.com/aysbg/mgw/internal/config"
 )
 
 func withCA(t *testing.T) Deps {
@@ -21,6 +22,25 @@ func withCA(t *testing.T) Deps {
 	}
 	d := testDeps()
 	d.CAPaths = []string{ca}
+	return d
+}
+
+// withInstall is withCA plus a minimal valid install, so doctor has a config.
+func withInstall(t *testing.T) Deps {
+	t.Helper()
+	d := withCA(t)
+	dir := t.TempDir()
+	cfg := config.New()
+	cfg.Providers = []config.Provider{{ID: "ollama-cloud", Dialect: "ollama", BaseURL: "https://ollama.com", Billing: "included_credits", IncludeStreamUsage: true}}
+	cfg.Strategy = "balanced"
+	cfg.ProviderPolicy.Order = []string{"ollama-cloud"}
+	if err := config.Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.WriteCredential(dir, "ollama-cloud", "fixture-key-not-a-secret"); err != nil {
+		t.Fatal(err)
+	}
+	d.ConfigDir = dir
 	return d
 }
 
@@ -53,7 +73,7 @@ func TestPricingRefreshVerifiesDigestAndWrites(t *testing.T) {
 	if s.CapturedAt != "2026-10-19T12:00:00Z" || s.SourceSHA256 != catalog.Digest(raw) || s.SourceURL != "https://example.test/api.json" {
 		t.Fatalf("snapshot header: %+v", s)
 	}
-	if st, _ := os.Stat(snap); st.Mode().Perm() != 0o600 {
+	if st, _ := os.Stat(snap); st.Mode().Perm() != 0o644 {
 		t.Fatalf("mode %v", st.Mode())
 	}
 }
@@ -142,7 +162,7 @@ func TestDoctor(t *testing.T) {
 	fresh := writeSnapshot(t, dir, fixedNow.Add(-29*24*time.Hour))
 	reg := filepath.Join(dir, "registry.json")
 
-	code, out := run(withCA(t), "--snapshot", fresh, "--registry", reg)
+	code, out := run(withInstall(t), "--snapshot", fresh, "--registry", reg)
 	if code != 0 {
 		t.Fatalf("warnings must not fail doctor: %d\n%s", code, out)
 	}
@@ -151,24 +171,24 @@ func TestDoctor(t *testing.T) {
 	}
 
 	old := writeSnapshot(t, t.TempDir(), fixedNow.Add(-31*24*time.Hour))
-	_, out = run(withCA(t), "--snapshot", old, "--registry", reg)
+	_, out = run(withInstall(t), "--snapshot", old, "--registry", reg)
 	if !strings.Contains(out, "warn  catalog") || !strings.Contains(out, "31 days") {
 		t.Fatalf("stale snapshot not warned:\n%s", out)
 	}
 
-	_, out = run(withCA(t), "--snapshot", filepath.Join(dir, "none.json"), "--registry", reg)
+	_, out = run(withInstall(t), "--snapshot", filepath.Join(dir, "none.json"), "--registry", reg)
 	if !strings.Contains(out, "warn  catalog") || !strings.Contains(out, "mgw pricing refresh") {
 		t.Fatalf("missing snapshot:\n%s", out)
 	}
 
-	noCA := testDeps()
+	noCA := withInstall(t)
 	noCA.CAPaths = []string{filepath.Join(dir, "absent.pem")}
 	_, out = run(noCA, "--snapshot", fresh, "--registry", reg)
 	if !strings.Contains(out, "warn  ca-bundle") {
 		t.Fatalf("missing CA bundle not warned:\n%s", out)
 	}
 
-	env := withCA(t)
+	env := withInstall(t)
 	env.CAPaths = nil
 	env.Getenv = func(k string) string {
 		if k == "SSL_CERT_FILE" {

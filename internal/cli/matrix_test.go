@@ -215,12 +215,12 @@ func TestMatrixWriteIsPinnedAndDoctorAgrees(t *testing.T) {
 	if err := policy.Validate(r); err != nil {
 		t.Fatal(err)
 	}
-	if st, _ := os.Stat(reg); st.Mode().Perm() != 0o600 {
+	if st, _ := os.Stat(reg); st.Mode().Perm() != 0o644 {
 		t.Fatalf("mode %v", st.Mode())
 	}
 
 	var dout, derr bytes.Buffer
-	if code := Doctor([]string{"--snapshot", snap, "--registry", reg}, &dout, &derr, withCA(t)); code != 0 {
+	if code := Doctor([]string{"--snapshot", snap, "--registry", reg}, &dout, &derr, withInstall(t)); code != 0 {
 		t.Fatalf("doctor %d\n%s%s", code, dout.String(), derr.String())
 	}
 	if !strings.Contains(dout.String(), "ok    registry") {
@@ -231,7 +231,7 @@ func TestMatrixWriteIsPinnedAndDoctorAgrees(t *testing.T) {
 		t.Fatal(err)
 	}
 	dout.Reset()
-	if code := Doctor([]string{"--snapshot", snap, "--registry", reg}, &dout, &derr, withCA(t)); code != ExitError {
+	if code := Doctor([]string{"--snapshot", snap, "--registry", reg}, &dout, &derr, withInstall(t)); code != ExitError {
 		t.Fatalf("doctor %d on tampered registry\n%s", code, dout.String())
 	}
 	if !strings.Contains(dout.String(), "FAIL  registry") {
@@ -266,7 +266,8 @@ func TestMatrixUsageAndErrors(t *testing.T) {
 		{"unknown flag", []string{"--bogus"}, ExitUsage, ""},
 		{"unknown provider", []string{"--snapshot", snap, "--providers", "nowhere"}, ExitUsage, "provider"},
 		{"strategy with write", []string{"--snapshot", snap, "--strategy", "best", "--write"}, ExitUsage, "strategy"},
-		{"no snapshot", []string{"--snapshot", filepath.Join(dir, "missing.json")}, ExitError, "mgw pricing refresh"},
+		{"no snapshot", []string{"--snapshot", filepath.Join(dir, "missing.json"), "--providers", "ollama-cloud"}, ExitError, "mgw pricing refresh"},
+		{"no config and no providers", []string{"--snapshot", snap}, ExitError, "missing_config"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

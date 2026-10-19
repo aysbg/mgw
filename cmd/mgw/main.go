@@ -1,8 +1,7 @@
 // Command mgw is the model gateway for coding agents.
 //
 // This file is deliberately thin: it parses the subcommand, prints help, and
-// delegates. Every real command lives under internal/cli and is added by the
-// implementation lanes.
+// delegates. Every real command lives under internal/cli.
 package main
 
 import (
@@ -24,7 +23,7 @@ var (
 const usage = `mgw - model gateway for coding agents
 
 Usage:
-  mgw <command> [flags]
+  mgw [--config DIR] [--profile FILE] <command> [flags]
 
 Commands:
   serve      Run the gateway for one attempt or interactive session
@@ -39,27 +38,29 @@ Commands:
 `
 
 func main() {
-	if len(os.Args) < 2 {
+	// Global flags (--config, --profile) precede the subcommand.
+	_, rest, err := cli.ParseGlobal(os.Args[1:])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mgw: %v\n", err)
+		os.Exit(2)
+	}
+	if len(rest) == 0 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
 
-	switch cmd := os.Args[1]; cmd {
+	switch cmd := rest[0]; cmd {
 	case "version":
-		printVersion(os.Args[2:])
+		printVersion(rest[1:])
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	case "serve":
-		os.Exit(cli.Serve(os.Args[2:], os.Stdout, os.Stderr, version))
-	case "matrix":
-		os.Exit(cli.Matrix(os.Args[2:], os.Stdout, os.Stderr, cli.DefaultDeps()))
-	case "pricing":
-		os.Exit(cli.Pricing(os.Args[2:], os.Stdout, os.Stderr, cli.DefaultDeps()))
-	case "doctor":
-		os.Exit(cli.Doctor(os.Args[2:], os.Stdout, os.Stderr, cli.DefaultDeps()))
-	case "exec", "init", "providers", "strategy":
-		// Each of these is implemented by a later lane. Failing closed with a
-		// distinct exit code keeps an unfinished build from looking functional.
+		os.Exit(cli.Serve(rest[1:], os.Stdout, os.Stderr, version))
+	case "init", "providers", "strategy", "matrix", "pricing", "doctor":
+		os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr, cli.DefaultDeps()))
+	case "exec":
+		// Implemented by a later lane. Failing closed with a distinct exit code
+		// keeps an unfinished build from looking functional.
 		fmt.Fprintf(os.Stderr, "mgw: %s is not implemented yet\n", cmd)
 		os.Exit(3)
 	default:

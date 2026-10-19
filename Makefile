@@ -31,7 +31,7 @@ tools:
 	tar -xzf $$tmp/$(GOLANGCI_TARBALL) -C $$tmp; \
 	install -m755 $$tmp/golangci-lint-$(GOLANGCI_NUM)-linux-amd64/golangci-lint $(GOBIN)/golangci-lint; \
 	rm -rf $$tmp; \
-	golangci-lint --version
+	$(GOBIN)/golangci-lint --version
 
 fmt:
 	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi

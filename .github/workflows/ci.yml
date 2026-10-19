@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+env:
+  GOVULN_VERSION: v1.9.0
+  GOSEC_VERSION: v2.29.0
+  GOLANGCI_VERSION: v2.15.0
+
 jobs:
   check:
     runs-on: ubuntu-24.04
@@ -17,7 +22,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27.2"
-          cache: true
+          cache: false
+      # The module has no dependencies, so there is no go.sum for setup-go to
+      # hash. Cache the tool build instead, keyed on the pinned tool versions.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-tools-${{ runner.os }}-${{ env.GOVULN_VERSION }}-${{ env.GOSEC_VERSION }}
       # One source of truth for tool pins: the Makefile. golangci-lint comes from
       # its release tarball, verified against the release checksums file. It is
       # never installed through install.sh, whose embedded checksum table can

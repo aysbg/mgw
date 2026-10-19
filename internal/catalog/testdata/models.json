@@ -1,0 +1,106 @@
+{
+  "anthropic": {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "models": {
+      "claude-opus-5-5": {
+        "id": "claude-opus-5-5", "name": "Claude Opus 5.5",
+        "tool_call": true, "reasoning": true, "reasoning_options": ["low", "medium", "high", "xhigh"], "open_weights": false,
+        "cost": {"input": 5, "output": 11, "cache_read": 0.5},
+        "limit": {"context": 1000000, "output": 64000},
+        "modalities": {"input": ["text", "image"], "output": ["text"]}
+      },
+      "claude-sonnet-5-5": {
+        "id": "claude-sonnet-5-5", "name": "Claude Sonnet 5.5",
+        "tool_call": true, "reasoning": true, "open_weights": false,
+        "cost": {"input": 2.5, "output": 5.5, "cache_read": 0.25},
+        "limit": {"context": 1000000, "output": 64000},
+        "modalities": {"input": ["text", "image"], "output": ["text"]}
+      },
+      "claude-haiku-5-5": {
+        "id": "claude-haiku-5-5", "name": "Claude Haiku 5.5",
+        "tool_call": true, "reasoning": true, "open_weights": false,
+        "cost": {"input": 0.1, "output": 0.5, "cache_read": 0.01},
+        "limit": {"context": 200000, "output": 32000},
+        "modalities": {"input": ["text", "image"], "output": ["text"]}
+      }
+    }
+  },
+  "openai": {
+    "id": "openai",
+    "name": "OpenAI",
+    "models": {
+      "gpt-6-astra": {
+        "id": "gpt-6-astra", "tool_call": true, "reasoning": true, "open_weights": false,
+        "cost": {"input": 12, "output": 32, "cache_read": 1.2},
+        "limit": {"context": 1000000, "output": 128000},
+        "modalities": {"input": ["text", "image"], "output": ["text"]}
+      },
+      "gpt-6.1-sol": {
+        "id": "gpt-6.1-sol", "tool_call": true, "reasoning": true, "open_weights": false,
+        "cost": {"input": 2, "output": 10, "cache_read": 0.2},
+        "limit": {"context": 400000, "output": 128000},
+        "modalities": {"input": ["text", "image"], "output": ["text"]}
+      },
+      "gpt-6-luna": {
+        "id": "gpt-6-luna", "tool_call": true, "reasoning": true, "open_weights": false,
+        "cost": {"input": 0.1, "output": 0.5, "cache_read": 0.01},
+        "limit": {"context": 200000, "output": 32000},
+        "modalities": {"input": ["text"], "output": ["text"]}
+      },
+      "gpt-image-9": {
+        "id": "gpt-image-9", "tool_call": false, "reasoning": false, "open_weights": false,
+        "cost": {"input": 5, "output": 40},
+        "limit": {"context": 32000, "output": 4096},
+        "modalities": {"input": ["text"], "output": ["text", "image"]}
+      }
+    }
+  },
+  "ollama-cloud": {
+    "id": "ollama-cloud",
+    "name": "Ollama Cloud",
+    "models": {
+      "kimi-k3": {
+        "id": "kimi-k3", "tool_call": true, "reasoning": true, "open_weights": true,
+        "cost": {"input": 3, "output": 15},
+        "limit": {"context": 256000, "output": 64000},
+        "modalities": {"input": ["text"], "output": ["text"]}
+      },
+      "glm-5.3": {
+        "id": "glm-5.3", "tool_call": true, "reasoning": true, "open_weights": true,
+        "cost": {"input": 1.5, "output": 3.5},
+        "limit": {"context": 200000, "output": 64000},
+        "modalities": {"input": ["text"], "output": ["text"]}
+      },
+      "glm-5.3-flash": {
+        "id": "glm-5.3-flash", "tool_call": true, "reasoning": true, "open_weights": true,
+        "cost": {"input": 0.15, "output": 0.5},
+        "limit": {"context": 200000, "output": 32000},
+        "modalities": {"input": ["text"], "output": ["text"]}
+      },
+      "deepseek-v4.1-flash": {
+        "id": "deepseek-v4.1-flash", "tool_call": true, "reasoning": true, "open_weights": true,
+        "cost": {"input": 0.15, "output": 0.55},
+        "limit": {"context": 128000, "output": 32000},
+        "modalities": {"input": ["text"], "output": ["text"]}
+      },
+      "deepseek-v4.1-flash:1017": {
+        "id": "deepseek-v4.1-flash:1017", "tool_call": true, "reasoning": true, "open_weights": true,
+        "cost": {"input": 0.15, "output": 0.6},
+        "limit": {"context": 128000, "output": 32000},
+        "modalities": {"input": ["text"], "output": ["text"]}
+      },
+      "embed-small": {
+        "id": "embed-small", "tool_call": false, "reasoning": false, "open_weights": true,
+        "cost": {"input": 0.000001, "output": 0},
+        "limit": {"context": 8000, "output": 0},
+        "modalities": {"input": ["text"], "output": ["text"]}
+      },
+      "free-preview": {
+        "id": "free-preview", "tool_call": true, "reasoning": true, "open_weights": true,
+        "limit": {"context": 128000, "output": 8000},
+        "modalities": {"input": ["text"], "output": ["text"]}
+      }
+    }
+  }
+}

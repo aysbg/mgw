@@ -1,0 +1,81 @@
+{
+  "version": "1",
+  "providers": [
+    {"id": "ollama-cloud", "billing": "included_credits"},
+    {"id": "anthropic", "billing": "metered"},
+    {"id": "openai", "billing": "metered"}
+  ],
+  "models": [
+    {
+      "id": "anthropic/claude-opus-5-5", "provider": "anthropic", "family": "anthropic", "tier": "top",
+      "role_rank": {"build": 90, "plan": 95, "review": 95, "advise": 96, "explore": 0},
+      "roles_allowed": ["build", "plan", "review", "advise"],
+      "efforts": ["low", "medium", "high", "xhigh"], "prohibited": [],
+      "evidence": "curated seed, P2 work order", "fixture_price": 5600000
+    },
+    {
+      "id": "openai/gpt-6-astra", "provider": "openai", "family": "openai", "tier": "top",
+      "role_rank": {"build": 95, "plan": 95, "review": 92, "advise": 94, "explore": 0},
+      "roles_allowed": ["build", "plan", "review", "advise"],
+      "efforts": ["low", "medium", "high", "xhigh"], "prohibited": ["low"],
+      "evidence": "curated seed, P2 work order", "fixture_price": 14000000
+    },
+    {
+      "id": "openai/gpt-6.1-sol", "provider": "openai", "family": "openai", "tier": "very_good",
+      "role_rank": {"build": 80, "plan": 82, "review": 80, "advise": 60, "explore": 0},
+      "roles_allowed": ["build", "plan", "review", "advise"],
+      "efforts": ["low", "medium", "high", "xhigh"], "prohibited": [],
+      "evidence": "curated seed, P2 work order", "fixture_price": 2800000
+    },
+    {
+      "id": "anthropic/claude-sonnet-5-5", "provider": "anthropic", "family": "anthropic", "tier": "very_good",
+      "role_rank": {"build": 78, "plan": 80, "review": 85, "advise": 65, "explore": 0},
+      "roles_allowed": ["build", "plan", "review", "advise"],
+      "efforts": ["low", "medium", "high", "xhigh"], "prohibited": [],
+      "evidence": "curated seed, P2 work order", "fixture_price": 2800000
+    },
+    {
+      "id": "ollama-cloud/kimi-k3", "provider": "ollama-cloud", "family": "moonshot", "tier": "very_good",
+      "role_rank": {"build": 0, "plan": 75, "review": 72, "advise": 70, "explore": 0},
+      "roles_allowed": ["plan", "review", "advise"],
+      "efforts": ["low", "high"], "prohibited": [],
+      "evidence": "curated seed, P2 work order", "fixture_price": 4200000
+    },
+    {
+      "id": "ollama-cloud/glm-5.3", "provider": "ollama-cloud", "family": "glm", "tier": "good",
+      "role_rank": {"build": 60, "plan": 58, "review": 40, "advise": 28, "explore": 20},
+      "roles_allowed": ["build", "plan", "review", "advise", "explore"],
+      "efforts": ["low", "high"], "prohibited": [],
+      "evidence": "curated seed, P2 work order", "fixture_price": 1700000
+    },
+    {
+      "id": "anthropic/claude-haiku-5-5", "provider": "anthropic", "family": "anthropic", "tier": "good",
+      "role_rank": {"build": 40, "plan": 38, "review": 45, "advise": 30, "explore": 25},
+      "roles_allowed": ["build", "plan", "review", "advise", "explore"],
+      "efforts": ["low", "medium", "high", "xhigh"], "prohibited": [],
+      "evidence": "curated seed, P2 work order", "fixture_price": 140000
+    },
+    {
+      "id": "ollama-cloud/glm-5.3-flash", "provider": "ollama-cloud", "family": "glm", "tier": "cheap",
+      "role_rank": {"build": 25, "plan": 20, "review": 0, "advise": 0, "explore": 30},
+      "roles_allowed": ["build", "plan", "explore"],
+      "efforts": ["low", "high"], "prohibited": [],
+      "evidence": "curated seed, P2 work order", "fixture_price": 185000
+    },
+    {
+      "id": "openai/gpt-6-luna", "provider": "openai", "family": "openai", "tier": "cheap",
+      "role_rank": {"build": 30, "plan": 25, "review": 0, "advise": 0, "explore": 28},
+      "roles_allowed": ["build", "plan", "explore"],
+      "efforts": ["low", "medium", "high", "xhigh"], "prohibited": [],
+      "evidence": "curated seed, P2 work order", "fixture_price": 140000
+    },
+    {
+      "id": "ollama-cloud/deepseek-v4.1-flash:1017", "provider": "ollama-cloud", "family": "deepseek", "tier": "cheap",
+      "role_rank": {"build": 28, "plan": 22, "review": 0, "advise": 0, "explore": 35},
+      "roles_allowed": ["build", "plan", "explore"],
+      "efforts": ["low", "medium", "high", "xhigh"], "prohibited": [],
+      "evidence": "release 1017 is current; model card vs the un-suffixed release: Terminal-Bench 4.0 42.3 vs 31.2, ProgramBench 29.1 vs 20.3, DeepSWE v1.1 77.0 vs 74.2, Apex Bench v1.1 72.1 vs 64.6, with shorter outputs",
+      "fixture_price": 195000
+    }
+  ]
+}

@@ -12,7 +12,7 @@ Status values: `planned` (no test yet) or `implemented` (test exists and passes)
 | G1 | Secret isolation | planned | internal/proxy/gate_01_secret_isolation_test.go |
 | G2 | Token authority | implemented | internal/proxy/gate_02_token_authority_test.go |
 | G3 | Upstream discipline | implemented | internal/proxy/gate_03_upstream_discipline_test.go |
-| G4 | Budget reservation | planned | internal/ledger/gate_04_budget_test.go |
+| G4 | Budget reservation | implemented | internal/proxy/gate_04_budget_test.go |
 | G5 | Commit boundary | implemented | internal/proxy/gate_05_commit_boundary_test.go |
 | G6 | Dialect parity per client | planned | internal/provider/gate_06_dialect_parity_test.go |
 | G7 | Routing guards | implemented | internal/policy/gate_07_routing_guards_test.go |

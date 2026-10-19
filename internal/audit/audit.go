@@ -60,6 +60,7 @@ var AllowedFields = []string{
 	"method", "path", "upstream_attempts", "commit_state", "status_code",
 	"duration_ms", "usage_status", "input_tokens", "output_tokens",
 	"cache_read_tokens", "failure_code", "policy_sha256", "registry_sha256",
+	"stream_usage_injected",
 }
 
 // Record is one audit line. Token counts are null when usage is unknown.
@@ -84,6 +85,9 @@ type Record struct {
 	FailureCode      string `json:"failure_code"`
 	PolicySHA256     string `json:"policy_sha256"`
 	RegistrySHA256   string `json:"registry_sha256"`
+	// StreamUsageInjected is true when the gateway added stream_options to the
+	// request body (the sanctioned payload exception, MGW-001).
+	StreamUsageInjected bool `json:"stream_usage_injected"`
 }
 
 var (

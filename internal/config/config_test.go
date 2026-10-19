@@ -113,6 +113,40 @@ func TestValidateNamedFailures(t *testing.T) {
 	}
 }
 
+func TestProviderBaseURLPrefixes(t *testing.T) {
+	cfg := sample()
+	cfg.Providers[0].BaseURL = "https://openrouter.ai/api"
+	dir := t.TempDir()
+	if err := Save(dir, cfg); err != nil {
+		t.Fatalf("cannot save config with a path prefix: %v", err)
+	}
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.Providers[0].BaseURL; got != cfg.Providers[0].BaseURL {
+		t.Fatalf("base_url = %q, want verbatim %q", got, cfg.Providers[0].BaseURL)
+	}
+	for _, base := range []string{
+		"https://openrouter.ai/api?key=value",
+		"https://openrouter.ai/api#fragment",
+		"https://openrouter.ai/api/../v1",
+		"https://openrouter.ai/api/",
+		"https://u:p@openrouter.ai/api",
+		"http://openrouter.ai/api",
+		"https://openrouter.ai/api//v1",
+	} {
+		t.Run(base, func(t *testing.T) {
+			cfg := sample()
+			cfg.Providers[0].BaseURL = base
+			err := cfg.Validate()
+			if code(err) != CodeBadValue || !strings.Contains(err.Error(), `provider "openai":`) || !strings.Contains(err.Error(), "base_url") {
+				t.Fatalf("want named bad_value provider error, got %v", err)
+			}
+		})
+	}
+}
+
 func TestCredentialIsWrittenAt0600AndNeverInConfig(t *testing.T) {
 	dir := t.TempDir()
 	const key = "sk-test-SECRET-value"

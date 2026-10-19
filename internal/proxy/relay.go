@@ -71,6 +71,15 @@ func newUpstream(p provider.Provider, cfg Config) (*upstream, error) {
 	return &upstream{p: p, base: base, client: client}, nil
 }
 
+// prefixedURL appends the native request path to the validated base URL.
+// Keep the base verbatim: URL resolution would discard an API path prefix.
+func (u *upstream) prefixedURL(native, rawQuery string) string {
+	if u.base.Path == "" {
+		return u.upstreamURL(native, rawQuery)
+	}
+	return u.p.BaseURL + (&url.URL{Path: native, RawQuery: rawQuery}).String()
+}
+
 // trackedWriter makes commit explicit. committed flips on the first header
 // write (status line or a forwarded 1xx), the first body write or the first
 // flush. After it flips the response can only be propagated or aborted, never
@@ -241,7 +250,7 @@ func (s *Server) roundTrip(ctx context.Context, tw *trackedWriter, r *http.Reque
 		},
 	}
 	ctx = httptrace.WithClientTrace(ctx, trace)
-	target := up.upstreamURL(native, r.URL.RawQuery)
+	target := up.prefixedURL(native, r.URL.RawQuery)
 	var req *http.Request
 	var err error
 	if rdr != nil {

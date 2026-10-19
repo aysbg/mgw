@@ -13,3 +13,17 @@ a 100k run budget instead of 12, allowing for other usage.
 The ceiling bounds each reservation, not the measured charge at settlement.
 An aborted stream with unknown usage keeps its reservation as an uncertain
 charge. Choose a larger ceiling when the workload needs it.
+
+## Provider base URLs
+
+A provider `base_url` can carry an optional API path prefix. The gateway
+preserves the prefix verbatim and appends the request path without URL resolution
+or path normalization. For example, `https://openrouter.ai/api` plus
+`/v1/chat/completions` produces `https://openrouter.ai/api/v1/chat/completions`.
+A host-root base such as `https://api.openai.com` also works.
+
+Use HTTPS. The only HTTP exception is the explicit test base
+`http://127.0.0.1[:port]`, which also accepts a path prefix. The base URL must not
+contain userinfo, a query string, a fragment, a trailing slash, a `..` path
+segment, or a double slash in its path. Validation also checks decoded path
+segments, so percent encoding cannot bypass these path restrictions.

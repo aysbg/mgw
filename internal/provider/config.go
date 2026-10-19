@@ -34,7 +34,7 @@ func (d Dialect) valid() bool {
 type Provider struct {
 	ID             string   `json:"id"`
 	Dialect        Dialect  `json:"dialect"`
-	BaseURL        string   `json:"base_url"`        // scheme+host, no path
+	BaseURL        string   `json:"base_url"`        // scheme+host, optional API path prefix
 	CredentialFile string   `json:"credential_file"` // 0600, one line
 	AllowedModels  []string `json:"allowed_models"`
 	Timeouts       Timeouts `json:"timeouts"`
@@ -119,8 +119,8 @@ func Validate(ps []Provider) error {
 	return nil
 }
 
-// validateBaseURL accepts https://host[:port], or the explicit test base
-// http://127.0.0.1[:port]. Nothing else: no path, query, fragment or userinfo.
+// validateBaseURL accepts https://host[:port][/prefix], or the explicit test base
+// http://127.0.0.1[:port][/prefix]. The prefix is not cleaned or normalized.
 func validateBaseURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -129,8 +129,27 @@ func validateBaseURL(raw string) error {
 	if u.Host == "" || u.Hostname() == "" {
 		return errors.New("base_url has no host")
 	}
-	if u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" || u.Opaque != "" {
-		return errors.New("base_url must be scheme and host only")
+	if u.User != nil {
+		return errors.New("base_url must not contain userinfo")
+	}
+	if u.RawQuery != "" || u.ForceQuery {
+		return errors.New("base_url must not contain a query string")
+	}
+	if strings.Contains(raw, "#") {
+		return errors.New("base_url must not contain a fragment")
+	}
+	if strings.HasSuffix(u.Path, "/") {
+		return errors.New("base_url must not have a trailing slash")
+	}
+	if strings.Contains(u.Path, "//") {
+		return errors.New("base_url must not contain a double slash in its path")
+	}
+	// Check decoded segments so escaped traversal and slashes cannot bypass
+	// the same restrictions applied to literal path characters.
+	for _, segment := range strings.Split(u.Path, "/") {
+		if segment == ".." {
+			return errors.New("base_url must not contain a '..' path segment")
+		}
 	}
 	switch u.Scheme {
 	case "https":

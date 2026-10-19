@@ -2,8 +2,8 @@
   "version": "1",
   "providers": [
     {"id": "ollama-cloud", "billing": "included_credits"},
-    {"id": "anthropic", "billing": "metered"},
-    {"id": "openai", "billing": "metered"}
+    {"id": "anthropic", "billing": "pay_per_token"},
+    {"id": "openai", "billing": "pay_per_token"}
   ],
   "models": [
     {

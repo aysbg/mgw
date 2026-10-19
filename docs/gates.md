@@ -17,7 +17,7 @@ Status values: `planned` (no test yet) or `implemented` (test exists and passes)
 | G6 | Dialect parity per client | planned | internal/provider/gate_06_dialect_parity_test.go |
 | G7 | Routing guards | implemented | internal/policy/gate_07_routing_guards_test.go |
 | G8 | Matrix fidelity and runtime admission | implemented | internal/catalog/gate_08_matrix_test.go |
-| G9 | Onboarding | planned | internal/cli/gate_09_onboarding_test.go |
+| G9 | Onboarding | implemented | internal/cli/gate_09_onboarding_test.go |
 | G10 | Assurance contract | planned | internal/policy/gate_10_assurance_test.go |
 | G11 | Lifecycle and placement | implemented | internal/proxy/gate_11_lifecycle_test.go |
 | G12 | Transport hardening | implemented | internal/proxy/gate_12_transport_test.go |

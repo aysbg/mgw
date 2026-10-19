@@ -29,6 +29,7 @@ distribution package.
 ```
 cmd/mgw          entry point: flags, subcommand dispatch, exit codes
 internal/cli     init, providers, strategy, matrix, pricing, doctor
+internal/config  install layout: config.json, credential files, engagement profiles
 internal/proxy   server, auth, route selection, relay, commit tracking
 internal/provider dialect handlers, usage parsers, error mapping
 internal/policy  registry load, candidate lists, hard guards

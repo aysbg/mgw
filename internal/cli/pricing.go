@@ -68,7 +68,7 @@ func pricingRefresh(args []string, stdout, stderr io.Writer, deps Deps) int {
 		_, _ = fmt.Fprintf(stderr, "mgw pricing refresh: %v\n", err)
 		return ExitError
 	}
-	if err := writeFileAtomic(*path, append(data, '\n')); err != nil {
+	if err := writePublicFile(*path, append(data, '\n')); err != nil {
 		_, _ = fmt.Fprintf(stderr, "mgw pricing refresh: write snapshot: %v\n", err)
 		return ExitError
 	}

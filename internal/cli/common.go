@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aysbg/mgw/internal/catalog"
+	"github.com/aysbg/mgw/internal/config"
 )
 
 // Default catalog source for `mgw pricing refresh`.
@@ -22,14 +23,28 @@ type Deps struct {
 	Getenv func(string) string
 	// CAPaths are the places `mgw doctor` looks for a CA bundle.
 	CAPaths []string
+	// ConfigDir is the --config override of the config directory.
+	ConfigDir string
+	// Profile is the --profile override: an engagement profile path or name.
+	Profile string
+	// Stdin is read only by interactive init. StdinIsTTY says whether it is a
+	// terminal; a nil StdinIsTTY means it is not.
+	Stdin      io.Reader
+	StdinIsTTY func() bool
+	// SetEcho turns terminal echo on or off, so a key can be typed without being
+	// shown. Nil means the host cannot hide input.
+	SetEcho func(on bool) error
 }
 
 // DefaultDeps returns the production dependencies.
 func DefaultDeps() Deps {
 	return Deps{
-		Now:    time.Now,
-		Fetch:  catalog.Fetch,
-		Getenv: os.Getenv,
+		Now:        time.Now,
+		Fetch:      catalog.Fetch,
+		Getenv:     os.Getenv,
+		Stdin:      os.Stdin,
+		StdinIsTTY: func() bool { return isTerminal(os.Stdin) },
+		SetEcho:    setEcho,
 		CAPaths: []string{
 			"/etc/ssl/certs/ca-certificates.crt", // Debian, Ubuntu
 			"/etc/pki/tls/certs/ca-bundle.crt",   // RHEL, Fedora
@@ -39,61 +54,36 @@ func DefaultDeps() Deps {
 	}
 }
 
-// stateDir is where the snapshot and the pinned registry live by default.
-func (d Deps) stateDir() string {
-	if v := d.Getenv("MGW_HOME"); v != "" {
-		return v
+// configDir resolves the config directory: --config, then MGW_CONFIG_DIR, then
+// $XDG_CONFIG_HOME/mgw, then ~/.config/mgw. With none of them it is a named
+// failure; there is no silent default.
+func (d Deps) configDir() (string, error) {
+	switch {
+	case d.ConfigDir != "":
+		return d.ConfigDir, nil
+	case d.Getenv(config.DirEnv) != "":
+		return d.Getenv(config.DirEnv), nil
+	case d.Getenv("XDG_CONFIG_HOME") != "":
+		return filepath.Join(d.Getenv("XDG_CONFIG_HOME"), "mgw"), nil
+	case d.Getenv("HOME") != "":
+		return filepath.Join(d.Getenv("HOME"), ".config", "mgw"), nil
 	}
-	if v := d.Getenv("XDG_CONFIG_HOME"); v != "" {
-		return filepath.Join(v, "mgw")
-	}
-	if v := d.Getenv("HOME"); v != "" {
-		return filepath.Join(v, ".config", "mgw")
-	}
-	return "."
+	return "", config.Fail(config.CodeMissingConfig, "cannot find the config directory; set %s or pass --config", config.DirEnv)
 }
 
-func (d Deps) defaultSnapshot() string { return filepath.Join(d.stateDir(), "pricing.json") }
-func (d Deps) defaultRegistry() string { return filepath.Join(d.stateDir(), "registry.json") }
+// stateDir is the directory of the default snapshot and registry paths. When no
+// directory resolves it is "", and the commands that need a config fail by name.
+func (d Deps) stateDir() string {
+	dir, _ := d.configDir()
+	return dir
+}
 
-// writeFileAtomic writes data to path through a temporary file in the same
-// directory and a rename, with mode 0600.
-func writeFileAtomic(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, ".mgw-*")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	ok := false
-	defer func() {
-		if !ok {
-			_ = os.Remove(name)
-		}
-	}()
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(name, path); err != nil {
-		return err
-	}
-	ok = true
-	return nil
+func (d Deps) defaultSnapshot() string { return config.PricingPath(d.stateDir()) }
+func (d Deps) defaultRegistry() string { return config.RegistryPath(d.stateDir()) }
+
+// writePublicFile writes a registry or snapshot: mode 0644, atomic.
+func writePublicFile(path string, data []byte) error {
+	return config.WriteFileAtomic(path, data, config.ModePublic)
 }
 
 // printTable writes left-aligned columns separated by one space, with widths

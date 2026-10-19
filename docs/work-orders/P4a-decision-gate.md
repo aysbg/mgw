@@ -55,12 +55,18 @@ or a routed model id; a test asserts the JSON keys.
 - Hard timeout on the whole call. A timeout is a **fallback**, not an error to the
   caller.
 - The key is read from `KeyFile` and never logged or returned.
+- Choice `probabilities` is a JSON object keyed by label, for example
+  `{"docs":0.0066,"bugfix":0.0119,"feature":0.0164,"migration":0.9651}`,
+  not an array. The live capture is `docs/fixtures/systemone-choice-real.json`.
 
 ## The gate
 
 Applied to the parsed response, in this order. Every failure sets
 `Fallback=true` and a machine reason from
-`missing_answer | bad_label | low_confidence | low_margin | timeout | transport`.
+`missing_answer | bad_label | low_confidence | low_margin | timeout | transport | bad_response`.
+`bad_response` means the response body could not be decoded as systemone JSON
+(invalid JSON or incompatible field types). Network/read failures and non-2xx
+HTTP responses remain `transport`, or `timeout` when a deadline is hit.
 
 1. Every requested answer present and of the expected type.
 2. A choice answer must be one of the declared criteria. Never accept a label the

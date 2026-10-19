@@ -34,6 +34,7 @@ Commands:
   matrix     Print the capability matrix
   pricing    Refresh the pricing snapshot
   doctor     Check the host and the pinned artifacts
+  decide     Classify a state file or record a shadow decision
   version    Print version information
 `
 
@@ -56,7 +57,7 @@ func main() {
 		fmt.Print(usage)
 	case "serve":
 		os.Exit(cli.Serve(rest[1:], os.Stdout, os.Stderr, version))
-	case "init", "providers", "strategy", "matrix", "pricing", "doctor":
+	case "init", "providers", "strategy", "matrix", "pricing", "doctor", "decide":
 		os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr, cli.DefaultDeps()))
 	case "exec":
 		// Implemented by a later lane. Failing closed with a distinct exit code

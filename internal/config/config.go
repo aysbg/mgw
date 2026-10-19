@@ -122,6 +122,7 @@ type Config struct {
 	DataClass      string            `json:"data_class"`
 	Profile        string            `json:"profile"`
 	Pins           map[string]string `json:"pins,omitempty"`
+	Decision       *Decision         `json:"decision,omitempty"`
 }
 
 // Endpoint returns the dialect and default base URL of a curated provider.
@@ -166,6 +167,7 @@ func New() *Config {
 	return &Config{
 		Schema: Schema, Providers: []Provider{}, DataClass: "internal", Profile: DefaultProfile,
 		ProviderPolicy: ProviderPolicy{Order: []string{}, Deny: []string{}},
+		Decision:       DefaultDecision(),
 	}
 }
 
@@ -191,6 +193,10 @@ func (c *Config) ProviderIDs() []string {
 // Clone returns a deep copy.
 func (c *Config) Clone() *Config {
 	out := *c
+	if c.Decision != nil {
+		d := *c.Decision
+		out.Decision = &d
+	}
 	out.Providers = make([]Provider, len(c.Providers))
 	for i, p := range c.Providers {
 		if p.Probe != nil {
@@ -282,7 +288,7 @@ func (c *Config) Validate() error {
 	if c.Profile != "" && !provider.ValidID(c.Profile) {
 		return Fail(CodeBadValue, "profile name %q is not a valid name", c.Profile)
 	}
-	return nil
+	return c.Decision.Validate()
 }
 
 // Load reads and validates config.json. A missing config is a named failure.

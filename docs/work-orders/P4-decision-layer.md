@@ -40,7 +40,8 @@ Both speak the same request shape:
 ```
 
 Response shape, per question: `type`, plus `choice` and `probabilities` for a
-choice, `probability` for a noul, `confidence` overall, and `usage`.
+choice (`probabilities` is an object keyed by label, not an array),
+`probability` for a noul, `confidence` overall, and `usage`.
 
 ## Task 1 — the client
 
@@ -70,7 +71,8 @@ Acceptance rules, in this order:
 5. `scout` follows the same rule as a risk flag.
 6. Any fallback sets `Fallback=true` with a machine reason
    (`missing_answer`, `bad_label`, `low_confidence`, `low_margin`, `timeout`,
-   `transport`), and the caller's complexity is used unchanged.
+   `transport`, `bad_response`), and the caller's complexity is used unchanged.
+   `bad_response` identifies JSON decode failures, not network failures.
 7. Deterministic validation of the *result* is mandatory: after parsing, assert
    the labels are in range and the flags are a subset of the five known names.
    A typed "verdict" is never an authorisation.

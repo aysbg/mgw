@@ -51,7 +51,13 @@ func main() {
 		fmt.Print(usage)
 	case "serve":
 		os.Exit(cli.Serve(os.Args[2:], os.Stdout, os.Stderr, version))
-	case "exec", "init", "providers", "strategy", "matrix", "pricing", "doctor":
+	case "matrix":
+		os.Exit(cli.Matrix(os.Args[2:], os.Stdout, os.Stderr, cli.DefaultDeps()))
+	case "pricing":
+		os.Exit(cli.Pricing(os.Args[2:], os.Stdout, os.Stderr, cli.DefaultDeps()))
+	case "doctor":
+		os.Exit(cli.Doctor(os.Args[2:], os.Stdout, os.Stderr, cli.DefaultDeps()))
+	case "exec", "init", "providers", "strategy":
 		// Each of these is implemented by a later lane. Failing closed with a
 		// distinct exit code keeps an unfinished build from looking functional.
 		fmt.Fprintf(os.Stderr, "mgw: %s is not implemented yet\n", cmd)

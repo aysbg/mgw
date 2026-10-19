@@ -17,17 +17,16 @@ import (
 	"time"
 )
 
-// Fallback reason codes. Every rejected answer carries exactly one of these,
+// Fallback reason codes. Every whole-result fallback carries one of these,
 // stable for logs and reports.
 const (
-	ReasonMissingAnswer     = "missing_answer"      // a requested answer was absent or mistyped
-	ReasonBadLabel          = "bad_label"           // a label the caller did not offer
-	ReasonLowConfidence     = "low_confidence"      // choice top probability below the floor
-	ReasonLowConfidenceFlag = "low_confidence_flag" // ambiguous noul; use the caller's whole classification
-	ReasonLowMargin         = "low_margin"          // top probability not far enough above the runner-up
-	ReasonTimeout           = "timeout"             // the call hit its hard deadline
-	ReasonTransport         = "transport"           // the call failed at the transport level
-	ReasonBadResponse       = "bad_response"        // the reply could not be decoded as systemone JSON
+	ReasonMissingAnswer = "missing_answer" // a requested answer was absent or mistyped
+	ReasonBadLabel      = "bad_label"      // a label the caller did not offer
+	ReasonLowConfidence = "low_confidence" // change_type probability below the floor
+	ReasonLowMargin     = "low_margin"     // change_type probability too close to the runner-up
+	ReasonTimeout       = "timeout"        // the call hit its hard deadline
+	ReasonTransport     = "transport"      // the call failed at the transport level
+	ReasonBadResponse   = "bad_response"   // the reply could not be decoded as systemone JSON
 )
 
 // Backend names understood by Config.
@@ -51,17 +50,21 @@ type Config struct {
 }
 
 // Result is the outcome of one classification. Type, Size, RiskFlags and
-// Scout are the four router complexity inputs and are set only when the gate
-// accepts the answer; on Fallback they are zero and the caller's own
-// complexity is used unchanged. Result carries no seat and no strategy. The
-// model field names the model that answered, which is not a routing seat and
-// carries no strategy. Confidence is the reported change_type confidence,
+// Scout are the four router complexity inputs. Type is required; size is
+// best-effort, and ambiguous flags are set and recorded in AmbiguousFlags.
+// On SizeFallback only Size is empty, for the caller to supply. On Fallback
+// all inputs are zero and the caller's own complexity is used unchanged.
+// Result carries no seat and no strategy. The model field names the model
+// that answered, which is not a routing seat and carries no strategy.
+// Confidence is the reported change_type confidence,
 // retained as telemetry only; it never controls acceptance.
 type Result struct {
 	Type           string   `json:"type"`
 	Size           string   `json:"size"`
 	RiskFlags      []string `json:"risk_flags"`
 	Scout          bool     `json:"scout"`
+	AmbiguousFlags []string `json:"ambiguous_flags"` // uncertain flags, including scout, treated as set
+	SizeFallback   bool     `json:"size_fallback"`   // size rejected; caller supplies it
 	Confidence     float64  `json:"confidence"`
 	Backend        string   `json:"backend"`
 	DecisionModel  string   `json:"decision_model"`
@@ -332,9 +335,9 @@ var upstream = &http.Client{
 // state into the four complexity inputs: type, size, risk flags and scout.
 //
 // The call carries a hard timeout. Every backend failure — timeout, transport
-// error, malformed reply, or an answer the gate rejects — is reported as a
-// fallback Result with a machine reason, never as an error and never as a
-// half-applied answer: the caller's own complexity is used unchanged.
+// error, malformed reply, or a rejected change_type — is reported as a
+// fallback Result with a machine reason, never as an error. An uncertain size
+// is left for the caller; uncertain flags are set and recorded, not rejected.
 // Classify returns an error only for a bad configuration, such as an
 // unreadable key file.
 func (cfg Config) Classify(ctx context.Context, state string) (Result, error) {
@@ -394,9 +397,9 @@ func (cfg Config) roundTrip(req *http.Request, start time.Time) Result {
 
 // applyGate applies the acceptance rules to a parsed systemone response, in
 // the mandatory order. changeTypes and sizes are the offered criteria in
-// offer order; the verdict must never depend on that order. Every failure
-// returns a fallback Result with a machine reason, and the four complexity
-// inputs are never half-applied.
+// offer order; the verdict must never depend on that order. Invalid answer
+// structure or labels and an uncertain change_type cause whole-result fallback.
+// An uncertain size degrades independently; ambiguous flags are treated as set.
 func applyGate(cfg Config, resp *responseBody, changeTypes, sizes []string, backend, model string, latencyMS int64) Result {
 	res := Result{Backend: backend, DecisionModel: model, LatencyMS: latencyMS}
 
@@ -415,38 +418,41 @@ func applyGate(cfg Config, resp *responseBody, changeTypes, sizes []string, back
 		return fail(res, ReasonBadLabel)
 	}
 
-	// Rule 3: floor and margin on each choice, change_type first.
-	for _, a := range []*answerBody{ct, sz} {
-		top, runnerUp := choiceSupport(a)
-		if top < cfg.ChoiceFloor {
-			return fail(res, ReasonLowConfidence)
-		}
-		if top-runnerUp < cfg.Margin {
-			return fail(res, ReasonLowMargin)
-		}
+	// Rule 3: change_type is required; size is best-effort.
+	top, runnerUp := choiceSupport(ct)
+	if top < cfg.ChoiceFloor {
+		return fail(res, ReasonLowConfidence)
 	}
+	if top-runnerUp < cfg.Margin {
+		return fail(res, ReasonLowMargin)
+	}
+	top, runnerUp = choiceSupport(sz)
+	res.SizeFallback = top < cfg.ChoiceFloor || top-runnerUp < cfg.Margin
 
 	// Rules 4 and 5: a noul asserts at the floor and is absent below 0.40.
-	// In between, fall back to the caller's whole classification: absence is
-	// permissive, so silently dropping a schema risk at 0.55 could route to a
-	// cheap seat. Do not force the flag on either. Probability is normalized
-	// from noul (or the legacy probability field) during decoding.
+	// In between, set the flag and record its ambiguity: absence is permissive,
+	// so silently dropping a schema risk at 0.55 could route to a cheap seat.
+	// Probability is normalized from noul (or the legacy probability field)
+	// during decoding.
 	var flags []string
 	scout := false
 	for _, q := range canonicalQuestions {
 		if q.Body.Type != kindNoul {
 			continue
 		}
-		if resp.Answers[q.Name].Probability < cfg.ConfidenceFloor {
-			if resp.Answers[q.Name].Probability >= 0.40 {
-				return fail(res, ReasonLowConfidenceFlag)
-			}
+		p := resp.Answers[q.Name].Probability
+		if p < cfg.ConfidenceFloor && p < 0.40 {
 			continue
 		}
+		name := riskFlag(q.Name)
 		if q.Name == qNeedsScout {
+			name = "scout"
 			scout = true
 		} else {
-			flags = append(flags, riskFlag(q.Name))
+			flags = append(flags, name)
+		}
+		if p < cfg.ConfidenceFloor {
+			res.AmbiguousFlags = append(res.AmbiguousFlags, name)
 		}
 	}
 
@@ -461,7 +467,9 @@ func applyGate(cfg Config, resp *responseBody, changeTypes, sizes []string, back
 	}
 
 	res.Type = ct.Choice
-	res.Size = sz.Choice
+	if !res.SizeFallback {
+		res.Size = sz.Choice
+	}
 	res.RiskFlags = flags
 	res.Scout = scout
 	res.Confidence = ct.Confidence
@@ -503,6 +511,8 @@ func fail(res Result, reason string) Result {
 	res.Size = ""
 	res.RiskFlags = nil
 	res.Scout = false
+	res.AmbiguousFlags = nil
+	res.SizeFallback = false
 	res.Confidence = 0
 	res.Fallback = true
 	res.FallbackReason = reason

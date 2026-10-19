@@ -262,7 +262,7 @@ func TestDecidePlainIncludesTelemetryAndFallbackReason(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit %d\n%s%s", code, out, errs)
 	}
-	for _, field := range []string{"type:", "size:", "risk_flags:", "scout:", "confidence:", "backend: ollama", "decision_model: clef-flash", "latency_ms:", "fallback_reason: low_confidence", "confidence_floor: 0.7", "choice_floor: 0.55"} {
+	for _, field := range []string{"type:", "size:", "risk_flags:", "scout:", "ambiguous_flags: []", "size_fallback: false", "confidence:", "backend: ollama", "decision_model: clef-flash", "latency_ms:", "fallback_reason: low_confidence", "confidence_floor: 0.7", "choice_floor: 0.55"} {
 		if !strings.Contains(out, field) {
 			t.Errorf("missing %q in %s", field, out)
 		}
@@ -293,17 +293,61 @@ func TestDecideUsesAndReportsConfiguredFloors(t *testing.T) {
 	}
 }
 
-func TestDecideAmbiguousFlagFallbackExitsZero(t *testing.T) {
-	reply := strings.Replace(decisionReply(0.9), `"needs_scout":{"type":"noul","probability":0.9}`, `"needs_scout":{"type":"noul","probability":0.55}`, 1)
-	f := newDecisionCLI(t, reply, "state")
-	code, out, errs := f.run("decide", "--state-file", f.state, "--json")
-	var got decision.Result
-	if err := json.Unmarshal([]byte(out), &got); err != nil {
-		t.Fatal(err)
-	}
-	if code != ExitOK || errs != "" || !got.Fallback || got.FallbackReason != decision.ReasonLowConfidenceFlag ||
-		got.Type != "" || got.Size != "" || got.RiskFlags != nil || got.Scout {
-		t.Fatalf("ambiguous flag did not discard all inputs: exit %d %+v %s", code, got, errs)
+func TestDecidePerQuestionDegradation(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		sizeFallback bool
+		ambiguous    bool
+	}{
+		{"accepted", false, false},
+		{"size only", true, false},
+		{"flags only", false, true},
+		{"size and flags", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reply := decisionReply(0.9)
+			wantSize, wantAmbiguous := "S", ""
+			if tc.sizeFallback {
+				reply = strings.Replace(reply, `"S":0.9,"M":0.1`, `"S":0.48,"M":0.45,"L":0.07`, 1)
+				wantSize = ""
+			}
+			if tc.ambiguous {
+				reply = strings.Replace(reply, `"schema_risk":{"type":"noul","probability":0.9}`, `"schema_risk":{"type":"noul","probability":0.607}`, 1)
+				reply = strings.Replace(reply, `"needs_scout":{"type":"noul","probability":0.9}`, `"needs_scout":{"type":"noul","probability":0.55}`, 1)
+				wantAmbiguous = "schema scout"
+			}
+			f := newDecisionCLI(t, reply, "state")
+			code, out, errs := f.run("decide", "--state-file", f.state, "--json")
+			var got decision.Result
+			if err := json.Unmarshal([]byte(out), &got); err != nil {
+				t.Fatal(err)
+			}
+			if code != ExitOK || errs != "" || got.Fallback || got.FallbackReason != "" ||
+				got.Type != "bugfix" || got.Size != wantSize || got.SizeFallback != tc.sizeFallback ||
+				strings.Join(got.RiskFlags, ",") != "schema" || !got.Scout ||
+				strings.Join(got.AmbiguousFlags, " ") != wantAmbiguous {
+				t.Fatalf("per-question result: exit %d %+v %s", code, got, errs)
+			}
+			// Assert the wire fields too: decoding alone cannot distinguish an
+			// absent field from its zero value.
+			for _, field := range []string{`"ambiguous_flags":`, fmt.Sprintf(`"size_fallback":%t`, tc.sizeFallback)} {
+				if !strings.Contains(out, field) {
+					t.Errorf("missing %q in %s", field, out)
+				}
+			}
+			code, out, errs = f.run("decide", "--state-file", f.state)
+			if code != ExitOK || errs != "" || strings.Contains(out, "fallback_reason:") {
+				t.Fatalf("normal degradation must not print an error: exit %d\n%s%s", code, out, errs)
+			}
+			for _, field := range []string{
+				"type: bugfix\n", "size: " + wantSize + "\n", "risk_flags: [schema]\n", "scout: true\n",
+				"ambiguous_flags: [" + wantAmbiguous + "]\n", fmt.Sprintf("size_fallback: %t\n", tc.sizeFallback),
+			} {
+				if !strings.Contains(out, field) {
+					t.Errorf("missing %q in %s", field, out)
+				}
+			}
+		})
 	}
 }
 

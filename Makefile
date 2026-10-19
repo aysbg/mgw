@@ -5,6 +5,9 @@ BUILDTIME?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS  := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildTime=$(BUILDTIME)
 
 GOLANGCI_VERSION := v2.15.0
+GOLANGCI_NUM     := $(patsubst v%,%,$(GOLANGCI_VERSION))
+GOLANGCI_TARBALL := golangci-lint-$(GOLANGCI_NUM)-linux-amd64.tar.gz
+GOLANGCI_BASE    := https://github.com/golangci/golangci-lint/releases/download/$(GOLANGCI_VERSION)
 GOVULN_VERSION   := v1.9.0
 GOSEC_VERSION    := v2.29.0
 GOBIN            ?= $(HOME)/.local/bin
@@ -13,12 +16,22 @@ GOBIN            ?= $(HOME)/.local/bin
 
 all: check
 
-## tools installs the pinned toolchain helpers into $(GOBIN).
+## tools installs the pinned helpers into $(GOBIN).
+## golangci-lint comes from its pinned release tarball, verified against the
+## release checksums file. Never through install.sh: that script carries its own
+## checksum table and breaks when the pin and the script disagree.
 tools:
 	GOBIN=$(GOBIN) $(GO) install golang.org/x/vuln/cmd/govulncheck@$(GOVULN_VERSION)
 	GOBIN=$(GOBIN) $(GO) install github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION)
-	@echo "golangci-lint is installed from the pinned release tarball; see docs/go-standard.md"
-	@command -v golangci-lint >/dev/null || echo "MISSING: golangci-lint $(GOLANGCI_VERSION)"
+	@set -e; mkdir -p $(GOBIN); tmp=$$(mktemp -d); \
+	echo "fetching golangci-lint $(GOLANGCI_VERSION)"; \
+	curl -sSfL -o $$tmp/$(GOLANGCI_TARBALL) $(GOLANGCI_BASE)/$(GOLANGCI_TARBALL); \
+	curl -sSfL -o $$tmp/checksums.txt $(GOLANGCI_BASE)/golangci-lint-$(GOLANGCI_NUM)-checksums.txt; \
+	( cd $$tmp && awk -v f="$(GOLANGCI_TARBALL)" '$$2==f' checksums.txt > one.sums && test -s one.sums && sha256sum -c one.sums ); \
+	tar -xzf $$tmp/$(GOLANGCI_TARBALL) -C $$tmp; \
+	install -m755 $$tmp/golangci-lint-$(GOLANGCI_NUM)-linux-amd64/golangci-lint $(GOBIN)/golangci-lint; \
+	rm -rf $$tmp; \
+	golangci-lint --version
 
 fmt:
 	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi

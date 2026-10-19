@@ -81,6 +81,20 @@ Using direct mode forgoes authoritative per-request accounting and in-lane
 credential isolation. Neither is a requirement for internal work today; the mode
 is per dispatch, so it is not all-or-nothing.
 
+**The economic reason is stronger than the architectural one.** A subscription
+(Claude Max, a ChatGPT or Codex plan) is a flat fee with a usage window, so the
+marginal cost of a request inside that window is about zero. This gateway
+requires provider API keys and cannot use subscription credentials, by design and
+for legal reasons. Routing internal work through it would therefore replace
+already-paid capacity with metered per-token billing — slower economics for no
+benefit our own repository needs.
+
+The same fact bounds the product: it serves engagements that hold **API keys or
+pay-per-token accounts**. A client whose access is subscription-only keeps using
+their own agent tooling's authentication; the gateway is not in that path, and
+the `cheapest` strategy ranks prepaid credits among API-key providers only — it
+does not and cannot model a flat-fee subscription.
+
 ## Security invariants
 
 - Provider keys never enter a lane. The lane holds a run-scoped token only.

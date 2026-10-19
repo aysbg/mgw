@@ -81,7 +81,7 @@ here — they come from the catalog):
 | anthropic/claude-haiku-5-5 | anthropic | anthropic | good | all five | low,medium,high,xhigh | — |
 | ollama-cloud/glm-5.3-flash | ollama-cloud | glm | cheap | all five | low,high | — |
 | openai/gpt-6-luna | openai | openai | cheap | all five | low,medium,high,xhigh | — |
-| ollama-cloud/deepseek-v4.1-flash | ollama-cloud | deepseek | cheap | all five | low,medium,high,xhigh | — |
+| ollama-cloud/deepseek-v4.1-flash:1017 | ollama-cloud | deepseek | cheap | all five | low,medium,high,xhigh | — |
 
 `role_rank` per role, 0-100, higher is better. This is curated judgement, not a
 derivation:
@@ -97,10 +97,18 @@ derivation:
 | claude-haiku-5-5 | 40 | 38 | 45 | 30 | 25 |
 | glm-5.3-flash | 25 | 20 | 0 | 0 | 30 |
 | gpt-6-luna | 30 | 25 | 0 | 0 | 28 |
-| deepseek-v4.1-flash | 28 | 22 | 0 | 0 | 35 |
+| deepseek-v4.1-flash:1017 | 28 | 22 | 0 | 0 | 35 |
 
 A rank of 0 means the seat is not eligible for that role; `roles_allowed` is the
 authority, and a rank of 0 on an allowed role is a validation error.
+
+The `:1017` suffix is part of the model id, not decoration. The catalog lists
+`deepseek-v4.1-flash` and `deepseek-v4.1-flash:1017` as separate entries, so an
+un-suffixed id silently routes to the older release. 1017 is the current
+release: the model card reports Terminal-Bench 4.0 at 42.3 against 31.2,
+ProgramBench 29.1 against 20.3, DeepSWE v1.1 at 77.0 against 74.2, and Apex
+Bench v1.1 at 72.1 against 64.6, with shorter outputs. Record those numbers in
+the entry's `evidence` string.
 
 ## 3. `internal/policy/registry.go`
 
@@ -160,7 +168,7 @@ regardless of tier.
 | explore | 0 |
 
 This is what makes the worked example hold: `glm-5.3-flash` has build rank 25 and
-is excluded from a cheap build, while `deepseek-v4.1-flash` at 28 survives; both
+is excluded from a cheap build, while `deepseek-v4.1-flash:1017` at 28 survives; both
 clear the explore floor, so price decides and `glm-5.3-flash` wins there.
 
 Balanced applies the existing complexity ladder: `level = TYPE_TIERS[type] +
@@ -229,11 +237,11 @@ cells. Column widths computed from content.
 
   | role | cheapest | balanced | best |
   |---|---|---|---|
-  | build | deepseek-v4.1-flash | glm-5.3 | glm-5.3 |
+  | build | deepseek-v4.1-flash:1017 | glm-5.3 | glm-5.3 |
   | plan | glm-5.3 | glm-5.3 | kimi-k3 |
   | review | glm-5.3 | kimi-k3 | kimi-k3 |
   | advise | glm-5.3 | kimi-k3 | kimi-k3 |
-  | explore | glm-5.3-flash | deepseek-v4.1-flash | deepseek-v4.1-flash |
+  | explore | glm-5.3-flash | deepseek-v4.1-flash:1017 | deepseek-v4.1-flash:1017 |
 
   Asserted for the default cell (`feature`, `M`, no risk). Also assert one
   multi-provider fixture where `cheapest` keeps the work on the preferred

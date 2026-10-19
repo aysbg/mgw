@@ -2,8 +2,12 @@ package decision
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
+	"os"
+	"reflect"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -27,6 +31,149 @@ func gateFixture(overrides map[string]*answerBody) *responseBody {
 // runGate feeds a response straight to the gate with the offered criteria.
 func runGate(resp *responseBody, changeTypes, sizes []string) Result {
 	return applyGate(gateConfig(), resp, changeTypes, sizes, BackendOllama, "clef-flash", 1)
+}
+
+func TestCapturedFullSystemonePassesCalibration(t *testing.T) {
+	data, err := os.ReadFile("../../docs/fixtures/systemone-full-real.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := testConfig(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(data)
+	})
+	res, err := cfg.Classify(context.Background(), "Migrate the persisted schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Fallback || res.FallbackReason != "" || res.Type != "migration" || res.Size != "M" ||
+		!slices.Equal(res.RiskFlags, []string{"schema"}) || res.Scout || res.Confidence != 0.7323 {
+		t.Fatalf("captured full response rejected or changed: %+v", res)
+	}
+}
+
+func TestGateChoiceCalibration(t *testing.T) {
+	for _, question := range []string{qChangeType, qSize} {
+		for _, tc := range []struct {
+			name   string
+			top    float64
+			runner float64
+			reason string
+		}{
+			{"below floor with strong margin", 0.50, 0.10, ReasonLowConfidence},
+			{"just below floor", 0.5499, 0.10, ReasonLowConfidence},
+			{"exact floor", 0.55, 0.10, ""},
+			{"low margin", 0.62, 0.55, ReasonLowMargin},
+			{"exact margin", 0.65, 0.50, ""},
+		} {
+			t.Run(question+"/"+tc.name, func(t *testing.T) {
+				resp := gateFixture(nil)
+				a := resp.Answers[question]
+				runner := "S"
+				if question == qChangeType {
+					runner = "feature"
+				}
+				a.Probabilities = map[string]float64{a.Choice: tc.top, runner: tc.runner}
+				res := runGate(resp, canonicalChangeTypes, canonicalSizes)
+				if res.Fallback != (tc.reason != "") || res.FallbackReason != tc.reason {
+					t.Fatalf("result = %+v; want reason %q", res, tc.reason)
+				}
+			})
+		}
+	}
+}
+
+func TestGateNoulAmbiguousBand(t *testing.T) {
+	for _, q := range canonicalQuestions {
+		if q.Body.Type != kindNoul {
+			continue
+		}
+		for _, p := range []float64{0, 0.39, 0.3999, 0.40, 0.55, 0.6999, 0.70, 0.95} {
+			t.Run(fmt.Sprintf("%s/%g", q.Name, p), func(t *testing.T) {
+				resp := gateFixture(nil)
+				resp.Answers[q.Name].Probability = p
+				res := runGate(resp, canonicalChangeTypes, canonicalSizes)
+				if p >= 0.40 && p < 0.70 {
+					if !res.Fallback || res.FallbackReason != ReasonLowConfidenceFlag || res.Type != "" ||
+						res.Size != "" || res.RiskFlags != nil || res.Scout || res.Confidence != 0 {
+						t.Fatalf("ambiguous noul must discard all inputs: %+v", res)
+					}
+					return
+				}
+				if res.Fallback || res.Type != "bugfix" || res.Size != "M" {
+					t.Fatalf("clear noul must accept: %+v", res)
+				}
+				set := res.Scout
+				if q.Name != qNeedsScout {
+					set = slices.Contains(res.RiskFlags, riskFlag(q.Name))
+				}
+				if set != (p >= 0.70) {
+					t.Fatalf("noul %g: incorrect flag in %+v", p, res)
+				}
+			})
+		}
+	}
+}
+
+func TestGateReportedConfidenceIsTelemetryOnly(t *testing.T) {
+	for _, reason := range []string{"", ReasonLowConfidence, ReasonLowMargin, ReasonLowConfidenceFlag} {
+		t.Run("reason="+reason, func(t *testing.T) {
+			var first Result
+			for i, confidence := range []float64{0, 0.1, 0.2584, 0.99} {
+				resp := gateFixture(nil)
+				resp.Answers[qChangeType].Confidence = confidence
+				resp.Answers[qSize].Confidence = confidence
+				switch reason {
+				case ReasonLowConfidence:
+					resp.Answers[qSize].Probabilities = map[string]float64{"M": 0.50, "S": 0.10}
+				case ReasonLowMargin:
+					resp.Answers[qSize].Probabilities = map[string]float64{"M": 0.62, "S": 0.55}
+				case ReasonLowConfidenceFlag:
+					resp.Answers[qNeedsScout].Probability = 0.55
+				}
+				res := runGate(resp, canonicalChangeTypes, canonicalSizes)
+				if res.FallbackReason != reason || res.Fallback != (reason != "") {
+					t.Fatalf("confidence %g changed the verdict: %+v", confidence, res)
+				}
+				if !res.Fallback && res.Confidence != confidence {
+					t.Fatalf("reported confidence was not preserved: %+v", res)
+				}
+				res.Confidence = 0 // compare decisions, not their distinct telemetry
+				if i == 0 {
+					first = res
+				} else if !reflect.DeepEqual(res, first) {
+					t.Fatalf("confidence changed the decision: %+v vs %+v", res, first)
+				}
+			}
+		})
+	}
+}
+
+func TestChoiceFloorConfig(t *testing.T) {
+	cfg := Config{Backend: BackendOllama, BaseURL: "http://localhost", Model: "clef-flash"}.withDefaults()
+	if cfg.ChoiceFloor != 0.55 || cfg.ConfidenceFloor != 0.70 {
+		t.Fatalf("wrong default floors: %+v", cfg)
+	}
+	for _, floor := range []float64{-0.1, 1, 1.1, math.NaN(), math.Inf(1)} {
+		cfg.ChoiceFloor = floor
+		if _, err := cfg.Classify(context.Background(), "state"); err == nil {
+			t.Fatalf("invalid choice floor %g accepted", floor)
+		}
+	}
+	resp := gateFixture(nil)
+	// The capture's size passes the default floor, but not a custom floor.
+	data, err := os.ReadFile("../../docs/fixtures/systemone-full-real.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, resp); err != nil {
+		t.Fatal(err)
+	}
+	cfg = gateConfig()
+	cfg.ChoiceFloor = 0.75
+	res := applyGate(cfg, resp, canonicalChangeTypes, canonicalSizes, BackendOllama, "clef-flash", 1)
+	if !res.Fallback || res.FallbackReason != ReasonLowConfidence {
+		t.Fatalf("custom choice floor ignored: %+v", res)
+	}
 }
 
 // Test 4: a choice answer outside the declared criteria is a bad_label
@@ -77,8 +224,8 @@ func TestGateChoiceSupportUsesDeclaredLabel(t *testing.T) {
 			resp := gateFixture(nil)
 			resp.Answers[qChangeType].Probabilities = probabilities
 			res := runGate(resp, canonicalChangeTypes, canonicalSizes)
-			if !res.Fallback || res.FallbackReason != ReasonLowMargin || res.Type != "" {
-				t.Fatalf("result = %+v; want low_margin for unsupported declared choice", res)
+			if !res.Fallback || res.FallbackReason != ReasonLowConfidence || res.Type != "" {
+				t.Fatalf("result = %+v; want low_confidence for unsupported declared choice", res)
 			}
 		})
 	}
@@ -109,8 +256,8 @@ func TestGateOrderPermutation(t *testing.T) {
 				qChangeType: {
 					Type:          kindChoice,
 					Choice:        "bugfix",
-					Confidence:    0.95, // above the floor; only the margin can reject
-					Probabilities: map[string]float64{"bugfix": 0.52, "feature": 0.48},
+					Confidence:    0.95, // telemetry only; the top passes and the margin fails
+					Probabilities: map[string]float64{"bugfix": 0.62, "feature": 0.55},
 				},
 			})
 			res := runGate(resp, order, canonicalSizes)
@@ -214,8 +361,8 @@ func TestGateHostileResponsesRejected(t *testing.T) {
 				Choice:     "feature",
 				Confidence: 1.0,
 				Probabilities: map[string]float64{
-					"feature": 0.50, // the claimed 1.0 is not what the numbers say
-					"bugfix":  0.50,
+					"feature": 0.55, // the claimed 1.0 is not what the numbers say
+					"bugfix":  0.45,
 				},
 			},
 		})

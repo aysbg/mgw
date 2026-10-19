@@ -33,6 +33,11 @@ func decisionReply(confidence float64) string {
 		"needs_scout":{"type":"noul","probability":0.9}}}`, confidence)
 }
 
+// lowChoiceReply has a clear margin but falls below the choice floor.
+func lowChoiceReply() string {
+	return strings.Replace(decisionReply(0.9), `"bugfix":0.9,"docs":0.1`, `"bugfix":0.50,"docs":0.1`, 1)
+}
+
 type decisionCLI struct {
 	dir   string
 	state string
@@ -99,10 +104,15 @@ func TestDecideJSONAcceptedAndFallback(t *testing.T) {
 		fallback   bool
 	}{
 		{"accepted", 0.9, false},
-		{"fallback", 0.6, true},
+		{"low reported confidence accepted", 0.1, false},
+		{"fallback", 0.9, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newDecisionCLI(t, decisionReply(tc.confidence), "Repair a schema bug\nfrom file")
+			reply := decisionReply(tc.confidence)
+			if tc.fallback {
+				reply = lowChoiceReply()
+			}
+			f := newDecisionCLI(t, reply, "Repair a schema bug\nfrom file")
 			code, out, errs := f.run("decide", "--state-file", f.state, "--json")
 			if code != ExitOK || errs != "" || f.calls.Load() != 1 {
 				t.Fatalf("exit %d calls %d\n%s%s", code, f.calls.Load(), out, errs)
@@ -114,11 +124,21 @@ func TestDecideJSONAcceptedAndFallback(t *testing.T) {
 			if got.Fallback != tc.fallback || got.Backend != "ollama" || got.DecisionModel != "clef-flash" || got.LatencyMS < 0 {
 				t.Fatalf("result: %+v", got)
 			}
+			var floors struct {
+				ConfidenceFloor float64 `json:"confidence_floor"`
+				ChoiceFloor     float64 `json:"choice_floor"`
+			}
+			if err := json.Unmarshal([]byte(out), &floors); err != nil {
+				t.Fatal(err)
+			}
+			if floors.ConfidenceFloor != 0.70 || floors.ChoiceFloor != 0.55 {
+				t.Fatalf("missing or incorrect floors: %+v", floors)
+			}
 			if tc.fallback {
 				if got.FallbackReason != decision.ReasonLowConfidence || got.Type != "" || got.Size != "" || got.Scout || len(got.RiskFlags) != 0 {
 					t.Fatalf("fallback changed complexity: %+v", got)
 				}
-			} else if got.Type != "bugfix" || got.Size != "S" || !got.Scout || got.Confidence != 0.9 || strings.Join(got.RiskFlags, ",") != "schema" {
+			} else if got.Type != "bugfix" || got.Size != "S" || !got.Scout || got.Confidence != tc.confidence || strings.Join(got.RiskFlags, ",") != "schema" {
 				t.Fatalf("gate result: %+v", got)
 			}
 			if strings.Contains(out+errs, decisionFixtureKey) {
@@ -237,15 +257,53 @@ func TestDecideFlagsOverrideBackendAndModel(t *testing.T) {
 }
 
 func TestDecidePlainIncludesTelemetryAndFallbackReason(t *testing.T) {
-	f := newDecisionCLI(t, decisionReply(0.6), "state")
+	f := newDecisionCLI(t, lowChoiceReply(), "state")
 	code, out, errs := f.run("decide", "--state-file", f.state)
 	if code != ExitOK {
 		t.Fatalf("exit %d\n%s%s", code, out, errs)
 	}
-	for _, field := range []string{"type:", "size:", "risk_flags:", "scout:", "confidence:", "backend: ollama", "decision_model: clef-flash", "latency_ms:", "fallback_reason: low_confidence"} {
+	for _, field := range []string{"type:", "size:", "risk_flags:", "scout:", "confidence:", "backend: ollama", "decision_model: clef-flash", "latency_ms:", "fallback_reason: low_confidence", "confidence_floor: 0.7", "choice_floor: 0.55"} {
 		if !strings.Contains(out, field) {
 			t.Errorf("missing %q in %s", field, out)
 		}
+	}
+}
+
+func TestDecideUsesAndReportsConfiguredFloors(t *testing.T) {
+	f := newDecisionCLI(t, decisionReply(0.9), "state")
+	f.cfg.Decision.ConfidenceFloor = 0.80
+	f.cfg.Decision.ChoiceFloor = 0.91 // strong probabilities still fail this custom floor
+	f.save(t)
+	code, out, errs := f.run("decide", "--state-file", f.state, "--json")
+	var got struct {
+		decision.Result
+		ConfidenceFloor float64 `json:"confidence_floor"`
+		ChoiceFloor     float64 `json:"choice_floor"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if code != ExitOK || errs != "" || got.ConfidenceFloor != 0.80 || got.ChoiceFloor != 0.91 ||
+		!got.Fallback || got.FallbackReason != decision.ReasonLowConfidence {
+		t.Fatalf("configured floors ignored or misreported: exit %d %+v %s", code, got, errs)
+	}
+	code, out, errs = f.run("decide", "--state-file", f.state)
+	if code != ExitOK || errs != "" || !strings.Contains(out, "confidence_floor: 0.8\n") || !strings.Contains(out, "choice_floor: 0.91\n") {
+		t.Fatalf("plain floors missing: exit %d\n%s%s", code, out, errs)
+	}
+}
+
+func TestDecideAmbiguousFlagFallbackExitsZero(t *testing.T) {
+	reply := strings.Replace(decisionReply(0.9), `"needs_scout":{"type":"noul","probability":0.9}`, `"needs_scout":{"type":"noul","probability":0.55}`, 1)
+	f := newDecisionCLI(t, reply, "state")
+	code, out, errs := f.run("decide", "--state-file", f.state, "--json")
+	var got decision.Result
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if code != ExitOK || errs != "" || !got.Fallback || got.FallbackReason != decision.ReasonLowConfidenceFlag ||
+		got.Type != "" || got.Size != "" || got.RiskFlags != nil || got.Scout {
+		t.Fatalf("ambiguous flag did not discard all inputs: exit %d %+v %s", code, got, errs)
 	}
 }
 

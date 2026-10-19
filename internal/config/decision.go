@@ -14,6 +14,7 @@ type Decision struct {
 	KeyFile         string  `json:"key_file"`
 	TimeoutMS       int     `json:"timeout_ms"`
 	ConfidenceFloor float64 `json:"confidence_floor"`
+	ChoiceFloor     float64 `json:"choice_floor"`
 	Margin          float64 `json:"margin"`
 }
 
@@ -22,7 +23,7 @@ func DefaultDecision() *Decision {
 	return &Decision{
 		Backend: "ollama", BaseURL: "https://ollama.com", Model: "clef-flash",
 		KeyFile: "credentials/decision.key", TimeoutMS: 2000,
-		ConfidenceFloor: 0.70, Margin: 0.15,
+		ConfidenceFloor: 0.70, ChoiceFloor: 0.55, Margin: 0.15,
 	}
 }
 
@@ -52,6 +53,9 @@ func (d *Decision) Validate() error {
 	}
 	if !(d.ConfidenceFloor > 0 && d.ConfidenceFloor < 1) {
 		return Fail(CodeBadValue, "decision confidence_floor must be in (0,1)")
+	}
+	if !(d.ChoiceFloor > 0 && d.ChoiceFloor < 1) {
+		return Fail(CodeBadValue, "decision choice_floor must be in (0,1)")
 	}
 	if !(d.Margin > 0 && d.Margin < 1) {
 		return Fail(CodeBadValue, "decision margin must be in (0,1)")

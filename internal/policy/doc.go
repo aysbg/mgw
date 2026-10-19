@@ -1,2 +1,3 @@
-// Package policy is part of mgw. Implementation arrives in a later lane.
+// Package policy holds the run-scoped authority record and the checks made
+// against it: token, expiry, provider, model and the request body cap.
 package policy

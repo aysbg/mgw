@@ -10,6 +10,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+
+	"github.com/aysbg/mgw/internal/cli"
 )
 
 // Set at build time with -ldflags. Defaults are for a local build.
@@ -47,7 +49,9 @@ func main() {
 		printVersion(os.Args[2:])
 	case "help", "-h", "--help":
 		fmt.Print(usage)
-	case "serve", "exec", "init", "providers", "strategy", "matrix", "pricing", "doctor":
+	case "serve":
+		os.Exit(cli.Serve(os.Args[2:], os.Stdout, os.Stderr, version))
+	case "exec", "init", "providers", "strategy", "matrix", "pricing", "doctor":
 		// Each of these is implemented by a later lane. Failing closed with a
 		// distinct exit code keeps an unfinished build from looking functional.
 		fmt.Fprintf(os.Stderr, "mgw: %s is not implemented yet\n", cmd)

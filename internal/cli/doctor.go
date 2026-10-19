@@ -42,7 +42,7 @@ func Doctor(args []string, stdout, stderr io.Writer, deps Deps) int {
 	failed := false
 	add := func(level, name, detail string) {
 		rows = append(rows, []string{fmt.Sprintf("%-6s%s", level, name), detail})
-		if level == "FAIL" {
+		if level == "FAIL" || level == "fail" {
 			failed = true
 		}
 	}
@@ -55,6 +55,7 @@ func Doctor(args []string, stdout, stderr io.Writer, deps Deps) int {
 		cfg = checkConfig(add, dir)
 		if cfg != nil {
 			checkCredentials(add, dir, cfg)
+			checkDecision(add, dir, cfg)
 		}
 	}
 	checkCA(add, deps)

@@ -26,6 +26,7 @@ const (
 	ReasonLowMargin     = "low_margin"     // top probability not far enough above the runner-up
 	ReasonTimeout       = "timeout"        // the call hit its hard deadline
 	ReasonTransport     = "transport"      // the call failed at the transport level
+	ReasonBadResponse   = "bad_response"   // the reply could not be decoded as systemone JSON
 )
 
 // Backend names understood by Config.
@@ -194,22 +195,41 @@ type responseBody struct {
 	Answers map[string]*answerBody `json:"answers"`
 }
 
-// answerBody is one per-question answer. A choice declares its label and an
-// ordered probabilities list; a noul declares one probability. The gate
-// scans the list and never indexes it by position, so its order cannot change
-// the verdict. Unknown reply fields, such as usage, are ignored.
+// answerBody is one per-question answer. A choice declares its label and a
+// probability object keyed by label; a noul declares one probability. Map
+// lookups make the gate independent of wire order. Unknown reply fields,
+// such as usage, are ignored.
 type answerBody struct {
-	Type          string     `json:"type"`
-	Choice        string     `json:"choice"`
-	Probabilities []probPair `json:"probabilities"`
-	Probability   float64    `json:"probability"`
-	Confidence    float64    `json:"confidence"`
+	Type          string             `json:"type"`
+	Choice        string             `json:"choice"`
+	Probabilities map[string]float64 `json:"probabilities"`
+	Probability   float64            `json:"probability"`
+	Confidence    float64            `json:"confidence"`
 }
 
-// probPair is one criterion probability in a choice answer.
-type probPair struct {
-	Label string  `json:"label"`
-	P     float64 `json:"p"`
+// UnmarshalJSON normalizes the provider's noul field into Probability. The
+// legacy probability field is read only when noul is absent, not when it is 0.
+func (a *answerBody) UnmarshalJSON(data []byte) error {
+	type plain answerBody
+	var wire struct {
+		plain
+		Noul        json.RawMessage `json:"noul"`
+		Probability json.RawMessage `json:"probability"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	probability := wire.Noul
+	if len(probability) == 0 {
+		probability = wire.Probability
+	}
+	if len(probability) != 0 {
+		if err := json.Unmarshal(probability, &wire.plain.Probability); err != nil {
+			return err
+		}
+	}
+	*a = answerBody(wire.plain)
+	return nil
 }
 
 // criteriaJSON marshals an ordered criteria list as a JSON object with the
@@ -360,7 +380,7 @@ func (cfg Config) roundTrip(req *http.Request, start time.Time) Result {
 	}
 	var parsed responseBody
 	if err := json.Unmarshal(data, &parsed); err != nil {
-		return cfg.failed(ReasonTransport, "", latency())
+		return cfg.failed(ReasonBadResponse, "", latency())
 	}
 	model := parsed.Model
 	if model == "" {
@@ -404,7 +424,8 @@ func applyGate(cfg Config, resp *responseBody, changeTypes, sizes []string, back
 	}
 
 	// Rules 4 and 5: a noul counts only at or above the floor; below it the
-	// flag is absent, never guessed.
+	// flag is absent, never guessed. Probability is normalized from noul (or
+	// the legacy probability field) during decoding.
 	var flags []string
 	scout := false
 	for _, q := range canonicalQuestions {
@@ -440,15 +461,13 @@ func applyGate(cfg Config, resp *responseBody, changeTypes, sizes []string, back
 }
 
 // choiceSupport returns the probability the answer assigns to its declared
-// label and the best probability of any other label. It scans the list; it
-// never indexes by position and never averages, so the list order cannot
-// change the verdict.
+// label and the best probability of any other label. The declared choice is
+// looked up by label, never by position, and probabilities are never averaged.
 func choiceSupport(a *answerBody) (top, runnerUp float64) {
-	for _, p := range a.Probabilities {
-		if p.Label == a.Choice {
-			top = math.Max(top, p.P)
-		} else {
-			runnerUp = math.Max(runnerUp, p.P)
+	top = a.Probabilities[a.Choice]
+	for label, p := range a.Probabilities {
+		if label != a.Choice {
+			runnerUp = math.Max(runnerUp, p)
 		}
 	}
 	return top, runnerUp
@@ -460,8 +479,8 @@ func labelsOffered(a *answerBody, offered []string) bool {
 	if !slices.Contains(offered, a.Choice) {
 		return false
 	}
-	for _, p := range a.Probabilities {
-		if !slices.Contains(offered, p.Label) {
+	for label := range a.Probabilities {
+		if !slices.Contains(offered, label) {
 			return false
 		}
 	}

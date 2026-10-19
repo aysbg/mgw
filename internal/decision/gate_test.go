@@ -2,7 +2,7 @@ package decision
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 	"net/http"
 	"slices"
 	"sync/atomic"
@@ -29,16 +29,6 @@ func runGate(resp *responseBody, changeTypes, sizes []string) Result {
 	return applyGate(gateConfig(), resp, changeTypes, sizes, BackendOllama, "clef-flash", 1)
 }
 
-// permute rotates an answer's probabilities list by n, so a gate that
-// indexes the list by position produces a different verdict.
-func permute(a *answerBody, n int) {
-	ps := slices.Clone(a.Probabilities)
-	if n == 0 {
-		return
-	}
-	a.Probabilities = append(ps[n:], ps[:n]...)
-}
-
 // Test 4: a choice answer outside the declared criteria is a bad_label
 // fallback, whatever probability it claims.
 func TestGateBadLabelForUnofferedLabel(t *testing.T) {
@@ -48,7 +38,7 @@ func TestGateBadLabelForUnofferedLabel(t *testing.T) {
 				Type:          kindChoice,
 				Choice:        "hotfix", // never offered
 				Confidence:    0.99,
-				Probabilities: []probPair{{"hotfix", 0.99}},
+				Probabilities: map[string]float64{"hotfix": 0.99},
 			},
 		})
 		res := runGate(resp, canonicalChangeTypes, canonicalSizes)
@@ -65,9 +55,9 @@ func TestGateBadLabelForUnofferedLabel(t *testing.T) {
 				Type:       kindChoice,
 				Choice:     "M",
 				Confidence: 0.90,
-				Probabilities: []probPair{
-					{"M", 0.88},
-					{"deploy", 0.10}, // never offered, not even at low probability
+				Probabilities: map[string]float64{
+					"M":      0.88,
+					"deploy": 0.10, // never offered, not even at low probability
 				},
 			},
 		})
@@ -76,6 +66,22 @@ func TestGateBadLabelForUnofferedLabel(t *testing.T) {
 			t.Fatalf("result = %+v; want bad_label fallback", res)
 		}
 	})
+}
+
+func TestGateChoiceSupportUsesDeclaredLabel(t *testing.T) {
+	for name, probabilities := range map[string]map[string]float64{
+		"another label has the highest probability": {"bugfix": 0.03, "feature": 0.97},
+		"declared label has no probability":         {"feature": 0.97},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp := gateFixture(nil)
+			resp.Answers[qChangeType].Probabilities = probabilities
+			res := runGate(resp, canonicalChangeTypes, canonicalSizes)
+			if !res.Fallback || res.FallbackReason != ReasonLowMargin || res.Type != "" {
+				t.Fatalf("result = %+v; want low_margin for unsupported declared choice", res)
+			}
+		})
+	}
 }
 
 // Test 10: the same state with the change_type criteria in three different
@@ -90,56 +96,50 @@ func TestGateOrderPermutation(t *testing.T) {
 
 	t.Run("high confidence keeps the same label in every order", func(t *testing.T) {
 		for _, order := range orders {
-			for n := range 3 {
-				resp := gateFixture(nil) // bugfix 0.93, feature 0.03
-				permute(resp.Answers[qChangeType], n)
-				res := runGate(resp, order, canonicalSizes)
-				if res.Fallback {
-					t.Fatalf("order %v (rotate %d): unexpected fallback %q", order, n, res.FallbackReason)
-				}
-				if res.Type != "bugfix" {
-					t.Errorf("order %v (rotate %d): type = %q; want bugfix", order, n, res.Type)
-				}
-				if res.Confidence != 0.95 {
-					t.Errorf("order %v (rotate %d): confidence = %v; want 0.95", order, n, res.Confidence)
-				}
+			resp := gateFixture(nil) // bugfix 0.93, feature 0.03
+			res := runGate(resp, order, canonicalSizes)
+			if res.Fallback || res.Type != "bugfix" || res.Confidence != 0.95 {
+				t.Fatalf("order %v: result = %+v; want accepted bugfix at 0.95", order, res)
 			}
 		}
 	})
 	t.Run("near tie is a low_margin fallback in every order", func(t *testing.T) {
 		for _, order := range orders {
-			for n := range 3 {
-				resp := gateFixture(map[string]*answerBody{
-					qChangeType: {
-						Type:          kindChoice,
-						Choice:        "bugfix",
-						Confidence:    0.95, // at the floor; only the margin can reject
-						Probabilities: []probPair{{"bugfix", 0.52}, {"feature", 0.48}},
-					},
-				})
-				permute(resp.Answers[qChangeType], n)
-				res := runGate(resp, order, canonicalSizes)
-				if !res.Fallback || res.FallbackReason != ReasonLowMargin {
-					t.Fatalf("order %v (rotate %d): result = %+v; want low_margin fallback", order, n, res)
-				}
-				if res.Type != "" {
-					t.Errorf("order %v (rotate %d): a near tie must never be silently picked, got type %q", order, n, res.Type)
-				}
+			resp := gateFixture(map[string]*answerBody{
+				qChangeType: {
+					Type:          kindChoice,
+					Choice:        "bugfix",
+					Confidence:    0.95, // above the floor; only the margin can reject
+					Probabilities: map[string]float64{"bugfix": 0.52, "feature": 0.48},
+				},
+			})
+			res := runGate(resp, order, canonicalSizes)
+			if !res.Fallback || res.FallbackReason != ReasonLowMargin || res.Type != "" {
+				t.Fatalf("order %v: result = %+v; want low_margin fallback", order, res)
 			}
 		}
 	})
 	t.Run("same state through the wire in three orders", func(t *testing.T) {
+		// Literal wire fixtures must not be marshaled from the production
+		// response struct: that concealed MGW-021's invented array shape.
+		probabilities := []string{
+			`{"bugfix":0.93,"feature":0.03,"docs":0.04}`,
+			`{"docs":0.04,"feature":0.03,"bugfix":0.93}`,
+			`{"feature":0.03,"bugfix":0.93,"docs":0.04}`,
+		}
 		var calls atomic.Int32
 		cfg := testConfig(t, func(w http.ResponseWriter, r *http.Request) {
-			answers := acceptedAnswers()
-			permute(answers[qChangeType], int(calls.Add(1)-1)%3)
-			out, err := json.Marshal(responseBody{Model: "clef-flash", Answers: answers})
-			if err != nil {
-				t.Errorf("fake systemone: encode reply: %v", err)
-				return
-			}
+			out := fmt.Sprintf(`{"model":"clef-flash","answers":{
+				"change_type":{"type":"choice","choice":"bugfix","confidence":0.95,"probabilities":%s},
+				"size":{"type":"choice","choice":"M","confidence":0.9,"probabilities":{"S":0.07,"M":0.88,"L":0.05}},
+				"schema_risk":{"type":"noul","probability":0.02},
+				"billing_risk":{"type":"noul","probability":0.01},
+				"auth_risk":{"type":"noul","probability":0.92},
+				"privacy_risk":{"type":"noul","probability":0.03},
+				"concurrency_risk":{"type":"noul","probability":0.85},
+				"needs_scout":{"type":"noul","probability":0.05}}}`, probabilities[int(calls.Add(1)-1)%3])
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write(out)
+			_, _ = fmt.Fprint(w, out)
 		})
 		var first Result
 		for i := range 3 {
@@ -177,7 +177,7 @@ func TestGateHostileResponsesRejected(t *testing.T) {
 				Type:          kindChoice,
 				Choice:        "deploy", // never offered, never will be
 				Confidence:    1.0,
-				Probabilities: []probPair{{"deploy", 1.0}},
+				Probabilities: map[string]float64{"deploy": 1.0},
 			},
 		})
 		res := runGate(resp, canonicalChangeTypes, canonicalSizes)
@@ -194,7 +194,7 @@ func TestGateHostileResponsesRejected(t *testing.T) {
 				Type:          kindChoice,
 				Choice:        "XL", // never offered
 				Confidence:    1.0,
-				Probabilities: []probPair{{"XL", 1.0}},
+				Probabilities: map[string]float64{"XL": 1.0},
 			},
 		})
 		res := runGate(resp, canonicalChangeTypes, canonicalSizes)
@@ -213,9 +213,9 @@ func TestGateHostileResponsesRejected(t *testing.T) {
 				Type:       kindChoice,
 				Choice:     "feature",
 				Confidence: 1.0,
-				Probabilities: []probPair{
-					{"feature", 0.50}, // the claimed 1.0 is not what the numbers say
-					{"bugfix", 0.50},
+				Probabilities: map[string]float64{
+					"feature": 0.50, // the claimed 1.0 is not what the numbers say
+					"bugfix":  0.50,
 				},
 			},
 		})
@@ -235,7 +235,7 @@ func TestGateHostileResponsesRejected(t *testing.T) {
 				Type:          kindChoice,
 				Choice:        "deploy",
 				Confidence:    1.0,
-				Probabilities: []probPair{{"deploy", 1.0}},
+				Probabilities: map[string]float64{"deploy": 1.0},
 			}
 		}
 		res := runGate(&responseBody{Model: "clef-flash", Answers: answers}, canonicalChangeTypes, canonicalSizes)

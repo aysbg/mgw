@@ -46,8 +46,8 @@ func ParseGlobal(args []string) (Global, []string, error) {
 	return g, args, nil
 }
 
-// Run parses the global flags and dispatches the onboarding-era commands:
-// init, providers, strategy, matrix, pricing and doctor. It is the entry point
+// Run parses the global flags and dispatches the install and decision commands:
+// init, providers, strategy, matrix, pricing, doctor and decide. It is the entry point
 // cmd/mgw uses, so tests that call it drive the real command path.
 func Run(args []string, stdout, stderr io.Writer, deps Deps) int {
 	g, rest, err := ParseGlobal(args)
@@ -73,6 +73,8 @@ func Run(args []string, stdout, stderr io.Writer, deps Deps) int {
 		return Pricing(tail, stdout, stderr, deps)
 	case "doctor":
 		return Doctor(tail, stdout, stderr, deps)
+	case "decide":
+		return Decide(tail, stdout, stderr, deps)
 	default:
 		_, _ = fmt.Fprintf(stderr, "mgw: unknown command %q\n", cmd)
 		return ExitUsage

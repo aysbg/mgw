@@ -1,0 +1,57 @@
+{
+ "model": "clef-flash",
+ "answers": {
+  "change_type": {
+   "type": "choice",
+   "choice": "migration",
+   "probabilities": {
+    "docs": 0.0074,
+    "test_only": 0.013,
+    "scaffold": 0.0171,
+    "bugfix": 0.0192,
+    "feature": 0.0463,
+    "refactor": 0.0212,
+    "migration": 0.8758
+   },
+   "confidence": 0.7323
+  },
+  "size": {
+   "type": "choice",
+   "choice": "M",
+   "probabilities": {
+    "S": 0.0937,
+    "M": 0.6607,
+    "L": 0.2456
+   },
+   "confidence": 0.2584
+  },
+  "schema_risk": {
+   "type": "noul",
+   "noul": 0.9223
+  },
+  "billing_risk": {
+   "type": "noul",
+   "noul": 0.1354
+  },
+  "auth_risk": {
+   "type": "noul",
+   "noul": 0.0073
+  },
+  "privacy_risk": {
+   "type": "noul",
+   "noul": 0.1302
+  },
+  "concurrency_risk": {
+   "type": "noul",
+   "noul": 0.0325
+  },
+  "needs_scout": {
+   "type": "noul",
+   "noul": 0.0364
+  }
+ },
+ "usage": {
+  "input_tokens": 883,
+  "output_tokens": 0
+ }
+}

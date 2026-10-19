@@ -40,7 +40,7 @@ func TestLoadRuntime(t *testing.T) {
 	if rt.ReadyFile != filepath.Join(dir, "ready.json") || rt.Providers[0].CredentialFile != filepath.Join(dir, "cred") {
 		t.Fatalf("relative paths not resolved against the runtime file: %+v", rt)
 	}
-	if rt.MaxReservationTokens != 8000 {
+	if rt.MaxReservationTokens != 2000 {
 		t.Fatalf("default reservation ceiling: %d", rt.MaxReservationTokens)
 	}
 	for name, mod := range map[string]func(map[string]any){

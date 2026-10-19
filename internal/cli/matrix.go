@@ -152,7 +152,7 @@ func Matrix(args []string, stdout, stderr io.Writer, deps Deps) int {
 			_, _ = fmt.Fprintf(stderr, "mgw matrix: refusing to write: %s; pass --allow-ungraded-build to accept\n", describeIssues(issues))
 			return ExitError
 		}
-		return runWrite(stdout, stderr, reg, *out)
+		return runWrite(stdout, stderr, reg, *out, deps.Build)
 	case *explain != "":
 		return runExplain(stdout, stderr, reg, *explain)
 	case *all:
@@ -385,7 +385,7 @@ func runCheck(stdout, stderr io.Writer, reg *policy.Registry, verr error) int {
 	return ExitOK
 }
 
-func runWrite(stdout, stderr io.Writer, reg *policy.Registry, path string) int {
+func runWrite(stdout, stderr io.Writer, reg *policy.Registry, path string, build BuildInfo) int {
 	if rep := policy.Check(reg); rep.Failed() {
 		_, _ = fmt.Fprintf(stderr, "mgw matrix: refusing to write: %d balanced review/advise cells are empty; run --check\n", len(rep.Failures))
 		return ExitError
@@ -403,6 +403,10 @@ func runWrite(stdout, stderr io.Writer, reg *policy.Registry, path string) int {
 	pin := fmt.Sprintf("%s  %s\n", sum, filepath.Base(path))
 	if err := writePublicFile(path+".sha256", []byte(pin)); err != nil {
 		_, _ = fmt.Fprintf(stderr, "mgw matrix: write pin: %v\n", err)
+		return ExitError
+	}
+	if err := writeRegistryBuild(path, sum, build); err != nil {
+		_, _ = fmt.Fprintf(stderr, "mgw matrix: write build pin: %v\n", err)
 		return ExitError
 	}
 	_, _ = fmt.Fprintf(stdout, "wrote %s\nsha256 %s\n", path, sum)

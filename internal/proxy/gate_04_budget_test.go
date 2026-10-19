@@ -262,11 +262,12 @@ func TestGate04_ReservationCappedByRemainingBudget(t *testing.T) {
 		defaultReserve int64
 		ceiling        int64
 	}{
-		{name: "large output cap", budget: 100000, cap: 1000000, reserved: 8000},
-		{name: "remaining below ceiling", budget: 5000, cap: 1000000, reserved: 5000},
+		{name: "large output cap", budget: 100000, cap: 1000000, reserved: 2000},
+		{name: "remaining below ceiling", budget: 1000, cap: 1000000, reserved: 1000},
 		{name: "default capped", budget: 100, cap: 0, reserved: 100},
-		{name: "default fits", budget: 100000, cap: 0, reserved: defaultReserveTokens},
-		{name: "configured ceiling", budget: 100000, cap: 1000000, ceiling: 2000, reserved: 2000},
+		{name: "fallback capped by default ceiling", budget: 100000, cap: 0, reserved: 2000},
+		{name: "default fits", budget: 100000, cap: 0, defaultReserve: 1000, reserved: 1000},
+		{name: "configured ceiling", budget: 100000, cap: 1000000, ceiling: 8000, reserved: 8000},
 		{name: "default above ceiling", budget: 100000, cap: 0, defaultReserve: 10000, ceiling: 2000, reserved: 2000},
 		{name: "negative cap uses bounded default", budget: 100000, cap: -1, defaultReserve: 10000, ceiling: 2000, reserved: 2000},
 		{name: "measured usage exceeds ceiling", budget: 100000, cap: 1000000, ceiling: 100, reserved: 100},
@@ -368,7 +369,7 @@ func TestGate04_DisconnectKeepsBoundedReservation(t *testing.T) {
 	if _, err := io.ReadFull(resp.Body, first); err != nil {
 		t.Fatal(err)
 	}
-	if tot := h.totals(); tot != (ledger.Totals{Reserved: 8000}) {
+	if tot := h.totals(); tot != (ledger.Totals{Reserved: 2000}) {
 		t.Fatalf("in-flight reservation must be bounded: %+v", tot)
 	}
 	_ = resp.Body.Close()
@@ -376,7 +377,7 @@ func TestGate04_DisconnectKeepsBoundedReservation(t *testing.T) {
 	done := make(chan struct{})
 	go func() { h.idle(); close(done) }()
 	waitFor(t, done, "disconnect settlement")
-	if tot := h.totals(); tot != (ledger.Totals{Uncertain: 8000}) {
+	if tot := h.totals(); tot != (ledger.Totals{Uncertain: 2000}) {
 		t.Fatalf("disconnect must charge only the reservation taken: %+v", tot)
 	}
 	if rec := h.lastRecord(); rec.FailureCode != audit.FailClientDisconnect || rec.UsageStatus != audit.UsageUnknown {
@@ -388,7 +389,7 @@ func TestGate04_DisconnectKeepsBoundedReservation(t *testing.T) {
 		t.Fatalf("next request must still succeed: %d %s", next.StatusCode, response)
 	}
 	h.idle()
-	if tot := h.totals(); tot != (ledger.Totals{Uncertain: 8000, Settled: 18}) {
+	if tot := h.totals(); tot != (ledger.Totals{Uncertain: 2000, Settled: 18}) {
 		t.Fatalf("ledger after next request: %+v", tot)
 	}
 }

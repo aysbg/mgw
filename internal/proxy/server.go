@@ -52,7 +52,7 @@ type Config struct {
 	CleanupTimeout time.Duration
 	// DefaultReserveTokens is reserved when a request declares no output cap.
 	DefaultReserveTokens int64
-	// MaxReservationTokens bounds each reservation. Zero defaults to 8000.
+	// MaxReservationTokens bounds each reservation. Zero defaults to 2000.
 	MaxReservationTokens int64
 	Logger               *slog.Logger
 
@@ -143,7 +143,7 @@ func New(cfg Config) (*Server, error) {
 // declares an output cap.
 const defaultReserveTokens = 4096
 
-const defaultMaxReservationTokens = 8000
+const defaultMaxReservationTokens = 2000
 
 // reserveBudget caps a request's reservation to the remaining budget and the
 // per-request ceiling. It does not cap measured usage at settlement.

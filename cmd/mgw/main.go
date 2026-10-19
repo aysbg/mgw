@@ -63,7 +63,9 @@ func main() {
 		deps.ConfigDir = g.ConfigDir
 		os.Exit(cli.Authority(rest[1:], os.Stdout, os.Stderr, deps))
 	case "init", "providers", "strategy", "matrix", "pricing", "doctor", "decide":
-		os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr, cli.DefaultDeps()))
+		deps := cli.DefaultDeps()
+		deps.Build = cli.BuildInfo{Version: version, Commit: commit, BuildTime: buildTime}
+		os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr, deps))
 	case "exec":
 		// Implemented by a later lane. Failing closed with a distinct exit code
 		// keeps an unfinished build from looking functional.

@@ -307,7 +307,7 @@ func connect(o *connectOpts, stdout io.Writer, deps Deps) error {
 	}
 	_, _ = fmt.Fprintln(stdout)
 	var werr bytes.Buffer
-	if code := runWrite(stdout, &werr, reg, config.RegistryPath(dir)); code != ExitOK {
+	if code := runWrite(stdout, &werr, reg, config.RegistryPath(dir), deps.Build); code != ExitOK {
 		return fmt.Errorf("write registry: %s", strings.TrimSpace(werr.String()))
 	}
 	_, _ = fmt.Fprintln(stdout)

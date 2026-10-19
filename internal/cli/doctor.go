@@ -58,6 +58,7 @@ func Doctor(args []string, stdout, stderr io.Writer, deps Deps) int {
 			checkDecision(add, dir, cfg)
 		}
 	}
+	checkBinary(add, deps.Build, *registry)
 	checkCA(add, deps)
 	checkRegistry(add, *registry)
 	checkSnapshot(add, deps, *snapshot)

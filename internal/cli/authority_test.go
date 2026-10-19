@@ -141,8 +141,8 @@ func TestAuthorityEmitsRuntimeAndToken(t *testing.T) {
 	if err := json.Unmarshal(runtimeData, &runtimeFields); err != nil {
 		t.Fatal(err)
 	}
-	if runtimeFields["max_reservation_tokens"] != float64(8000) || rt.MaxReservationTokens != 8000 {
-		t.Fatal("runtime must explicitly emit the 8000-token reservation ceiling")
+	if runtimeFields["max_reservation_tokens"] != float64(2000) || rt.MaxReservationTokens != 2000 {
+		t.Fatal("runtime must explicitly emit the 2000-token reservation ceiling")
 	}
 	for _, p := range rt.Providers {
 		if !reflect.DeepEqual(p.AllowedModels, expected[p.ID]) || !filepath.IsAbs(p.CredentialFile) || p.CredentialFile != config.CredentialPath(f.dir, p.ID) {

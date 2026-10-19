@@ -37,7 +37,7 @@ type Runtime struct {
 	CleanupTimeoutMS int `json:"cleanup_timeout_ms"`
 	// DefaultReserveTokens is reserved for a request that declares no output cap.
 	DefaultReserveTokens int64 `json:"default_reserve_tokens"`
-	// MaxReservationTokens bounds each reservation. Defaults to 8000 if omitted.
+	// MaxReservationTokens bounds each reservation. Defaults to 2000 if omitted.
 	MaxReservationTokens int64 `json:"max_reservation_tokens"`
 }
 

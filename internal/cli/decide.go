@@ -81,10 +81,14 @@ func Decide(args []string, stdout, stderr io.Writer, deps Deps) int {
 		}
 		_, err = fmt.Fprintln(stdout, "shadow: recorded")
 	} else if *asJSON {
-		err = json.NewEncoder(stdout).Encode(result)
+		err = json.NewEncoder(stdout).Encode(struct {
+			decision.Result
+			ConfidenceFloor float64 `json:"confidence_floor"`
+			ChoiceFloor     float64 `json:"choice_floor"`
+		}{result, dc.ConfidenceFloor, dc.ChoiceFloor})
 	} else {
-		_, err = fmt.Fprintf(stdout, "type: %s\nsize: %s\nrisk_flags: %v\nscout: %t\nconfidence: %.2f\nbackend: %s\ndecision_model: %s\nlatency_ms: %d\n",
-			result.Type, result.Size, result.RiskFlags, result.Scout, result.Confidence, result.Backend, result.DecisionModel, result.LatencyMS)
+		_, err = fmt.Fprintf(stdout, "type: %s\nsize: %s\nrisk_flags: %v\nscout: %t\nconfidence: %.2f\nbackend: %s\ndecision_model: %s\nlatency_ms: %d\nconfidence_floor: %g\nchoice_floor: %g\n",
+			result.Type, result.Size, result.RiskFlags, result.Scout, result.Confidence, result.Backend, result.DecisionModel, result.LatencyMS, dc.ConfidenceFloor, dc.ChoiceFloor)
 		if err == nil && result.Fallback {
 			_, err = fmt.Fprintf(stdout, "fallback_reason: %s\n", result.FallbackReason)
 		}
@@ -108,6 +112,6 @@ func decisionConfig(dir string, block *config.Decision) decision.Config {
 	return decision.Config{
 		Backend: block.Backend, BaseURL: block.BaseURL, Model: block.Model, KeyFile: key,
 		Timeout:         time.Duration(block.TimeoutMS) * time.Millisecond,
-		ConfidenceFloor: block.ConfidenceFloor, Margin: block.Margin,
+		ConfidenceFloor: block.ConfidenceFloor, ChoiceFloor: block.ChoiceFloor, Margin: block.Margin,
 	}
 }

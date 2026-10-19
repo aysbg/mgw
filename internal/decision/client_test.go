@@ -202,19 +202,21 @@ func TestCapturedSystemoneNoulPassesGate(t *testing.T) {
 
 func TestNoulWireFieldsAndFloor(t *testing.T) {
 	cases := []struct {
-		name   string
-		fields string
-		want   float64
-		fires  bool
+		name     string
+		fields   string
+		want     float64
+		fires    bool
+		fallback bool
 	}{
-		{"noul above floor", `"noul":0.9487`, 0.9487, true},
-		{"noul at floor", `"noul":0.70`, 0.70, true},
-		{"noul below floor", `"noul":0.6999`, 0.6999, false},
-		{"legacy probability", `"probability":0.85`, 0.85, true},
-		{"legacy below floor", `"probability":0.05`, 0.05, false},
-		{"noul wins", `"noul":0.95,"probability":0.05`, 0.95, true},
-		{"zero noul wins", `"probability":0.95,"noul":0`, 0, false},
-		{"secondary field is not read", `"noul":0.95,"probability":"unused"`, 0.95, true},
+		{"noul above floor", `"noul":0.9487`, 0.9487, true, false},
+		{"noul at floor", `"noul":0.70`, 0.70, true, false},
+		{"noul below floor", `"noul":0.6999`, 0.6999, false, true},
+		{"legacy probability", `"probability":0.85`, 0.85, true, false},
+		{"legacy below floor", `"probability":0.05`, 0.05, false, false},
+		{"legacy ambiguous", `"probability":0.55`, 0.55, false, true},
+		{"noul wins", `"noul":0.95,"probability":0.05`, 0.95, true, false},
+		{"zero noul wins", `"probability":0.95,"noul":0`, 0, false, false},
+		{"secondary field is not read", `"noul":0.95,"probability":"unused"`, 0.95, true, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -233,6 +235,12 @@ func TestNoulWireFieldsAndFloor(t *testing.T) {
 				resp.Answers[q.Name] = &answer
 			}
 			res := runGate(resp, canonicalChangeTypes, canonicalSizes)
+			if tc.fallback {
+				if !res.Fallback || res.FallbackReason != ReasonLowConfidenceFlag || res.Type != "" || res.Size != "" || res.RiskFlags != nil || res.Scout {
+					t.Fatalf("ambiguous noul must discard the whole classification: %+v", res)
+				}
+				return
+			}
 			var wantFlags []string
 			if tc.fires {
 				wantFlags = canonicalFlags
@@ -331,10 +339,10 @@ func TestClassifyAcceptedSetsAllFourInputs(t *testing.T) {
 	}
 }
 
-// Test 2: confidence below the floor is a low_confidence fallback.
+// Test 2: top probability below the choice floor is a low_confidence fallback.
 func TestClassifyLowConfidenceFallsBack(t *testing.T) {
 	answers := acceptedAnswers()
-	answers[qChangeType].Confidence = 0.50 // below the 0.70 floor
+	answers[qChangeType].Probabilities = map[string]float64{"bugfix": 0.50, "feature": 0.10}
 	cfg := testConfig(t, (&systemoneSpy{}).answersHandler(t, answers))
 
 	res, err := cfg.Classify(context.Background(), "state")
@@ -352,9 +360,9 @@ func TestClassifyLowConfidenceFallsBack(t *testing.T) {
 // Test 3: top and runner-up within the margin is a low_margin fallback.
 func TestClassifyLowMarginFallsBack(t *testing.T) {
 	answers := acceptedAnswers()
-	answers[qChangeType].Confidence = 0.95 // at the floor
+	answers[qChangeType].Confidence = 0.95 // telemetry cannot rescue a low margin
 	answers[qChangeType].Probabilities = map[string]float64{
-		"bugfix": 0.52, "feature": 0.48, // margin 0.04 < 0.15
+		"bugfix": 0.62, "feature": 0.55, // acceptable top, margin 0.07 < 0.15
 	}
 	cfg := testConfig(t, (&systemoneSpy{}).answersHandler(t, answers))
 
@@ -500,11 +508,11 @@ func TestClassifyBadResponseIsNotTransportFailure(t *testing.T) {
 	}
 }
 
-// Test 9: a flag probability below the floor leaves the flag absent while
+// Test 9: a flag probability below the ambiguous band leaves the flag absent while
 // the answer stays accepted.
 func TestClassifyFlagBelowFloorIsAbsentNotGuessed(t *testing.T) {
 	answers := acceptedAnswers()
-	answers[qAuthRisk].Probability = 0.55 // above zero, below the 0.70 floor
+	answers[qAuthRisk].Probability = 0.39 // below the ambiguous band
 	cfg := testConfig(t, (&systemoneSpy{}).answersHandler(t, answers))
 
 	res, err := cfg.Classify(context.Background(), "state")

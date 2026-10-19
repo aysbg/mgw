@@ -19,6 +19,9 @@ func TestDecisionConfigValidationOnLoad(t *testing.T) {
 		{"zero timeout", func(d *Decision) { d.TimeoutMS = 0 }, "timeout_ms"},
 		{"zero floor", func(d *Decision) { d.ConfidenceFloor = 0 }, "confidence_floor"},
 		{"large floor", func(d *Decision) { d.ConfidenceFloor = 1 }, "confidence_floor"},
+		{"zero choice floor", func(d *Decision) { d.ChoiceFloor = 0 }, "choice_floor"},
+		{"negative choice floor", func(d *Decision) { d.ChoiceFloor = -0.1 }, "choice_floor"},
+		{"large choice floor", func(d *Decision) { d.ChoiceFloor = 1 }, "choice_floor"},
 		{"zero margin", func(d *Decision) { d.Margin = 0 }, "margin"},
 		{"large margin", func(d *Decision) { d.Margin = 1 }, "margin"},
 		{"sum", func(d *Decision) { d.Margin = 0.4 }, "confidence_floor+margin"},
@@ -44,7 +47,7 @@ func TestDecisionConfigValidationOnLoad(t *testing.T) {
 
 func TestDecisionConfigDefaultsAbsentAndClone(t *testing.T) {
 	cfg := New()
-	if cfg.Decision == nil || cfg.Decision.Enabled || cfg.Decision.Model != "clef-flash" || cfg.Decision.KeyFile != "credentials/decision.key" {
+	if cfg.Decision == nil || cfg.Decision.Enabled || cfg.Decision.Model != "clef-flash" || cfg.Decision.KeyFile != "credentials/decision.key" || cfg.Decision.ChoiceFloor != 0.55 || cfg.Decision.ConfidenceFloor != 0.70 {
 		t.Fatalf("init defaults: %+v", cfg.Decision)
 	}
 	clone := cfg.Clone()
@@ -59,6 +62,9 @@ func TestDecisionConfigDefaultsAbsentAndClone(t *testing.T) {
 		}
 		if got.Decision != nil && (got.Decision.Enabled || got.Decision.Validate() != nil) {
 			t.Fatalf("disabled block: %+v", got.Decision)
+		}
+		if got.Decision != nil && got.Decision.ChoiceFloor != 0.55 {
+			t.Fatalf("omitted choice floor did not default: %+v", got.Decision)
 		}
 		if block == "" && got.Decision != nil {
 			t.Fatal("absent block was enabled or invented")

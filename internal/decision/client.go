@@ -20,13 +20,14 @@ import (
 // Fallback reason codes. Every rejected answer carries exactly one of these,
 // stable for logs and reports.
 const (
-	ReasonMissingAnswer = "missing_answer" // a requested answer was absent or mistyped
-	ReasonBadLabel      = "bad_label"      // a label the caller did not offer
-	ReasonLowConfidence = "low_confidence" // choice confidence below the floor
-	ReasonLowMargin     = "low_margin"     // top probability not far enough above the runner-up
-	ReasonTimeout       = "timeout"        // the call hit its hard deadline
-	ReasonTransport     = "transport"      // the call failed at the transport level
-	ReasonBadResponse   = "bad_response"   // the reply could not be decoded as systemone JSON
+	ReasonMissingAnswer     = "missing_answer"      // a requested answer was absent or mistyped
+	ReasonBadLabel          = "bad_label"           // a label the caller did not offer
+	ReasonLowConfidence     = "low_confidence"      // choice top probability below the floor
+	ReasonLowConfidenceFlag = "low_confidence_flag" // ambiguous noul; use the caller's whole classification
+	ReasonLowMargin         = "low_margin"          // top probability not far enough above the runner-up
+	ReasonTimeout           = "timeout"             // the call hit its hard deadline
+	ReasonTransport         = "transport"           // the call failed at the transport level
+	ReasonBadResponse       = "bad_response"        // the reply could not be decoded as systemone JSON
 )
 
 // Backend names understood by Config.
@@ -45,6 +46,7 @@ type Config struct {
 	KeyFile         string        // 0600, one line; empty means no key
 	Timeout         time.Duration // default 2s, hard deadline on the whole call
 	ConfidenceFloor float64       // default 0.70
+	ChoiceFloor     float64       // default 0.55; choice top probability, not reported confidence
 	Margin          float64       // default 0.15
 }
 
@@ -53,7 +55,8 @@ type Config struct {
 // accepts the answer; on Fallback they are zero and the caller's own
 // complexity is used unchanged. Result carries no seat and no strategy. The
 // model field names the model that answered, which is not a routing seat and
-// carries no strategy.
+// carries no strategy. Confidence is the reported change_type confidence,
+// retained as telemetry only; it never controls acceptance.
 type Result struct {
 	Type           string   `json:"type"`
 	Size           string   `json:"size"`
@@ -414,18 +417,20 @@ func applyGate(cfg Config, resp *responseBody, changeTypes, sizes []string, back
 
 	// Rule 3: floor and margin on each choice, change_type first.
 	for _, a := range []*answerBody{ct, sz} {
-		if a.Confidence < cfg.ConfidenceFloor {
+		top, runnerUp := choiceSupport(a)
+		if top < cfg.ChoiceFloor {
 			return fail(res, ReasonLowConfidence)
 		}
-		top, runnerUp := choiceSupport(a)
 		if top-runnerUp < cfg.Margin {
 			return fail(res, ReasonLowMargin)
 		}
 	}
 
-	// Rules 4 and 5: a noul counts only at or above the floor; below it the
-	// flag is absent, never guessed. Probability is normalized from noul (or
-	// the legacy probability field) during decoding.
+	// Rules 4 and 5: a noul asserts at the floor and is absent below 0.40.
+	// In between, fall back to the caller's whole classification: absence is
+	// permissive, so silently dropping a schema risk at 0.55 could route to a
+	// cheap seat. Do not force the flag on either. Probability is normalized
+	// from noul (or the legacy probability field) during decoding.
 	var flags []string
 	scout := false
 	for _, q := range canonicalQuestions {
@@ -433,6 +438,9 @@ func applyGate(cfg Config, resp *responseBody, changeTypes, sizes []string, back
 			continue
 		}
 		if resp.Answers[q.Name].Probability < cfg.ConfidenceFloor {
+			if resp.Answers[q.Name].Probability >= 0.40 {
+				return fail(res, ReasonLowConfidenceFlag)
+			}
 			continue
 		}
 		if q.Name == qNeedsScout {
@@ -533,6 +541,9 @@ func (cfg Config) withDefaults() Config {
 	if cfg.ConfidenceFloor <= 0 {
 		cfg.ConfidenceFloor = 0.70
 	}
+	if cfg.ChoiceFloor == 0 {
+		cfg.ChoiceFloor = 0.55
+	}
 	if cfg.Margin <= 0 {
 		cfg.Margin = 0.15
 	}
@@ -541,6 +552,9 @@ func (cfg Config) withDefaults() Config {
 
 // validate rejects a Config the client cannot call.
 func (cfg Config) validate() error {
+	if !(cfg.ChoiceFloor > 0 && cfg.ChoiceFloor < 1) {
+		return errors.New("decision: choice_floor must be in (0,1)")
+	}
 	switch cfg.Backend {
 	case BackendOllama, BackendJev:
 	default:

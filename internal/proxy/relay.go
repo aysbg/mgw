@@ -385,6 +385,14 @@ func failureForContext(r *http.Request, ctx context.Context) string {
 	return audit.FailStreamInterrupted
 }
 
+// writeFlush writes p to the client and pushes it out.
+func writeFlush(tw *trackedWriter, p []byte) error {
+	if _, err := tw.Write(p); err != nil {
+		return err
+	}
+	return tw.flush()
+}
+
 // stream commits the response and relays the body in fixed-size chunks, writing
 // and flushing after each read. It never buffers the whole body.
 func (s *Server) stream(tw *trackedWriter, r *http.Request, ctx context.Context, cancel context.CancelFunc, st *reqState, up *upstream, resp *http.Response) {
@@ -418,26 +426,29 @@ func (s *Server) stream(tw *trackedWriter, r *http.Request, ctx context.Context,
 	buf := make([]byte, chunkSize)
 	for {
 		n, rerr := resp.Body.Read(buf)
+		// upstreamDone is the fact that separates a completed stream from a
+		// disconnect: the upstream body reached EOF, so the whole response is
+		// in hand and usage is final. net/http may report EOF together with
+		// the last bytes, so it is read before the write below.
+		upstreamDone := errors.Is(rerr, io.EOF)
 		if n > 0 {
 			idle.Reset(up.p.Timeouts.Idle())
 			if scan {
 				_, _ = scanner.Write(buf[:n])
 			}
-			if _, werr := tw.Write(buf[:n]); werr != nil {
-				cancel() // client gone: cancel upstream
+			werr := writeFlush(tw, buf[:n])
+			if werr != nil && !upstreamDone {
+				cancel() // client gone before the upstream finished: cancel upstream
 				st.failure = audit.FailClientDisconnect
 				return
 			}
-			if ferr := tw.flush(); ferr != nil {
-				cancel()
-				st.failure = audit.FailClientDisconnect
-				return
-			}
+			// A failed write after upstream EOF changes nothing: the request
+			// succeeded and the client simply left. Fall through to settle it.
 		}
 		if rerr == nil {
 			continue
 		}
-		if errors.Is(rerr, io.EOF) {
+		if upstreamDone {
 			if scan {
 				st.usage = scanner.Usage()
 			}

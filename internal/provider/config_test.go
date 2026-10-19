@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,6 +93,69 @@ func TestCredential(t *testing.T) {
 		}
 		if got != "" || strings.Contains(err.Error(), "sk-secret") {
 			t.Fatalf("%s: credential leaked", name)
+		}
+	}
+}
+
+func TestStreamUsageDefaultsFollowDialect(t *testing.T) {
+	yes, no := true, false
+	cases := []struct {
+		dialect Dialect
+		setting *bool
+		want    bool
+	}{
+		{DialectOpenAI, nil, true},
+		{DialectOpenRouter, nil, true},
+		{DialectOllama, nil, true},
+		{DialectAnthropic, nil, false},
+		{DialectOpenAI, &no, false},
+		{DialectOpenRouter, &no, false},
+		{DialectOllama, &no, false},
+		{DialectAnthropic, &yes, true},
+	}
+	for _, tc := range cases {
+		p := good()
+		p.Dialect, p.IncludeStreamUsage = tc.dialect, tc.setting
+		if got := p.StreamUsage(); got != tc.want {
+			set := "unset"
+			if tc.setting != nil {
+				set = map[bool]string{true: "true", false: "false"}[*tc.setting]
+			}
+			t.Errorf("dialect %s, include_stream_usage %s: StreamUsage() = %v, want %v", tc.dialect, set, got, tc.want)
+		}
+	}
+}
+
+func TestIncludeStreamUsageDecodesFromConfig(t *testing.T) {
+	var ps []Provider
+	raw := `[{"id":"a","dialect":"openai"},{"id":"b","dialect":"openai","include_stream_usage":false},{"id":"c","dialect":"anthropic","include_stream_usage":true}]`
+	if err := json.Unmarshal([]byte(raw), &ps); err != nil {
+		t.Fatal(err)
+	}
+	if ps[0].IncludeStreamUsage != nil || !ps[0].StreamUsage() {
+		t.Error("absent setting must stay nil and resolve to the dialect default")
+	}
+	if ps[1].IncludeStreamUsage == nil || ps[1].StreamUsage() {
+		t.Error("explicit false must disable injection")
+	}
+	if ps[2].IncludeStreamUsage == nil || !ps[2].StreamUsage() {
+		t.Error("explicit true must enable injection")
+	}
+}
+
+func TestValidateAcceptsTheFourDialectsAndRejectsOthers(t *testing.T) {
+	for _, d := range []Dialect{DialectOpenAI, DialectOpenRouter, DialectOllama, DialectAnthropic} {
+		p := good()
+		p.Dialect = d
+		if err := p.Validate(); err != nil {
+			t.Errorf("dialect %q rejected: %v", d, err)
+		}
+	}
+	for _, d := range []Dialect{"", "OpenAI", "gemini", "openai-compatible"} {
+		p := good()
+		p.Dialect = d
+		if err := p.Validate(); err == nil || !strings.Contains(err.Error(), "unknown dialect") {
+			t.Errorf("dialect %q accepted, err=%v", d, err)
 		}
 	}
 }

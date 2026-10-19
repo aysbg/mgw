@@ -38,6 +38,20 @@ type Provider struct {
 	CredentialFile string   `json:"credential_file"` // 0600, one line
 	AllowedModels  []string `json:"allowed_models"`
 	Timeouts       Timeouts `json:"timeouts"`
+	// IncludeStreamUsage asks the gateway to add stream_options.include_usage to
+	// streaming requests that carry no stream_options. Nil selects the dialect
+	// default; see StreamUsage.
+	IncludeStreamUsage *bool `json:"include_stream_usage"`
+}
+
+// StreamUsage reports whether the gateway may inject stream_options for this
+// provider. An explicit setting wins; otherwise the default is true for the
+// openai, openrouter and ollama dialects and false for anthropic.
+func (p Provider) StreamUsage() bool {
+	if p.IncludeStreamUsage != nil {
+		return *p.IncludeStreamUsage
+	}
+	return p.Dialect != DialectAnthropic
 }
 
 // Timeouts holds the four upstream deadlines, in milliseconds. Zero is a defect.

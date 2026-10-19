@@ -5,10 +5,13 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -309,4 +312,107 @@ func TestGate15_ClientDisconnectCancelsUpstream(t *testing.T) {
 	if tot := h.totals(); tot.Reserved != 0 || tot.Uncertain != 100 {
 		t.Fatalf("reservation not settled after disconnect: %+v", tot)
 	}
+
+	// MGW-002: the cases above and below separate a real disconnect from the
+	// normal end of a stream that was fully relayed.
+	t.Run("client write fails after upstream EOF is a success", func(t *testing.T) {
+		reached := make(chan struct{})
+		release := make(chan struct{})
+		var once sync.Once
+		h := newHarness(t, func(o *harnessOpts) {
+			// Content-Length makes net/http report EOF together with the last
+			// bytes, so the relay holds the whole stream and the EOF before it
+			// attempts the write that the reset client makes fail.
+			o.handler = func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.Header().Set("Content-Length", strconv.Itoa(len(openAIStream)))
+				_, _ = io.WriteString(w, openAIStream)
+			}
+			o.panicHook = func(stage string) {
+				if stage == "after_commit" {
+					once.Do(func() { close(reached) })
+					<-release
+				}
+			}
+		})
+		conn, err := dialTCP(hostPort(h))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := "POST " + chatPath + " HTTP/1.1\r\nHost: " + hostPort(h) + "\r\nAuthorization: Bearer " + h.token +
+			"\r\nContent-Type: application/json\r\nContent-Length: " + strconv.Itoa(len(streamChatBody)) + "\r\n\r\n" + streamChatBody
+		if _, err := io.WriteString(conn, req); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-reached:
+		case <-time.After(streamWait):
+			t.Fatal("the gateway never committed the response")
+		}
+		// Reset the connection (SO_LINGER 0) so the gateway's next write fails
+		// at once, then let the relay proceed.
+		if tc, ok := conn.(*net.TCPConn); ok {
+			_ = tc.SetLinger(0)
+		}
+		_ = conn.Close()
+		close(release)
+
+		rec := h.lastRecord()
+		if rec.FailureCode != "" {
+			t.Fatalf("a stream the upstream finished must not carry a failure code: %+v", rec)
+		}
+		if rec.CommitState != audit.CommitCommitted || rec.StatusCode != http.StatusOK {
+			t.Fatalf("audit must say committed: %+v", rec)
+		}
+		if rec.UsageStatus != audit.UsageMeasured || i64v(rec.InputTokens) != 12 || i64v(rec.OutputTokens) != 5 {
+			t.Fatalf("usage must stay as parsed: %+v", rec)
+		}
+		if tot := h.totals(); tot.Settled != 17 || tot.Uncertain != 0 || tot.Reserved != 0 {
+			t.Fatalf("ledger must settle the measured total with no uncertain charge: %+v", tot)
+		}
+	})
+
+	t.Run("client disconnect before response headers commits nothing", func(t *testing.T) {
+		received := make(chan struct{})
+		var once sync.Once
+		h := newHarness(t, func(o *harnessOpts) {
+			o.handler = func(_ http.ResponseWriter, r *http.Request) {
+				once.Do(func() { close(received) })
+				select { // never answers; ends when the gateway cancels the upstream call
+				case <-r.Context().Done():
+				case <-time.After(streamWait):
+				}
+			}
+		})
+		conn, err := dialTCP(hostPort(h))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := "POST " + chatPath + " HTTP/1.1\r\nHost: " + hostPort(h) + "\r\nAuthorization: Bearer " + h.token +
+			"\r\nContent-Type: application/json\r\nContent-Length: " + strconv.Itoa(len(streamChatBody)) + "\r\n\r\n" + streamChatBody
+		if _, err := io.WriteString(conn, req); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-received:
+		case <-time.After(streamWait):
+			t.Fatal("upstream never saw the request")
+		}
+		_ = conn.Close() // hang up before any response header exists
+
+		rec := h.lastRecord()
+		if rec.FailureCode != audit.FailClientDisconnect {
+			t.Fatalf("failure_code = %q, want client_disconnect: %+v", rec.FailureCode, rec)
+		}
+		if rec.CommitState == audit.CommitCommitted || rec.StatusCode != 0 {
+			t.Fatalf("no response was committed, the audit must not say so: %+v", rec)
+		}
+		if rec.UsageStatus != audit.UsageUnknown {
+			t.Fatalf("usage: %+v", rec)
+		}
+		// The request reached the upstream, so the charge is kept as uncertain.
+		if tot := h.totals(); tot.Reserved != 0 || tot.Uncertain != 100 || tot.Settled != 0 {
+			t.Fatalf("ledger: %+v", tot)
+		}
+	})
 }

@@ -98,3 +98,36 @@ func FuzzParseUsage(f *testing.F) {
 		}
 	})
 }
+
+func TestUsageScannerReadsOpenAIStreamUsageFromFinalEmptyChoicesChunk(t *testing.T) {
+	stream := "data: {\"id\":\"c1\",\"choices\":[{\"delta\":{\"content\":\"Hel\"}}],\"usage\":null}\n\n" +
+		"data: {\"id\":\"c1\",\"choices\":[{\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}],\"usage\":null}\n\n" +
+		"data: {\"id\":\"c1\",\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":5,\"total_tokens\":17}}\n\n" +
+		"data: [DONE]\n\n"
+	var s UsageScanner
+	for i := 0; i < len(stream); i += 7 { // fragmented, as a real relay delivers it
+		_, _ = s.Write([]byte(stream[i:min(i+7, len(stream))]))
+	}
+	got := s.Usage()
+	if !got.Measured() || !eq(got.InputTokens, ptr(12)) || !eq(got.OutputTokens, ptr(5)) || got.Total() != 17 {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestUsageScannerReadsAnthropicInputFromMessageStartAndOutputFromMessageDelta(t *testing.T) {
+	stream := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"usage\":{\"input_tokens\":25,\"output_tokens\":1}}}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"hi\"}}\n\n" +
+		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":42}}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+	got := ParseUsage([]byte(stream))
+	if !eq(got.InputTokens, ptr(25)) || !eq(got.OutputTokens, ptr(42)) || got.Total() != 67 {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestUsageScannerReportsNothingForAStreamWithoutAUsageChunk(t *testing.T) {
+	stream := "data: {\"id\":\"c1\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n"
+	if got := ParseUsage([]byte(stream)); got.Measured() {
+		t.Fatalf("invented usage: %+v", got)
+	}
+}

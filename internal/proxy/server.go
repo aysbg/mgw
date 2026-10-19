@@ -335,6 +335,7 @@ type reqState struct {
 	reserveTokens int64
 	maybeBilled   bool // upstream may have consumed tokens that nothing measured
 	usage         provider.Usage
+	streamInject  bool // the gateway added stream_options.include_usage to the body
 }
 
 func newID() string {
@@ -491,6 +492,10 @@ func (s *Server) serveRequest(tw *trackedWriter, r *http.Request, st *reqState) 
 	if s.cfg.panicHook != nil {
 		s.cfg.panicHook("before_commit")
 	}
+	if up.p.StreamUsage() {
+		// The one sanctioned payload exception: see provider.InjectStreamUsage.
+		body, st.streamInject = provider.InjectStreamUsage(body)
+	}
 	s.relay(tw, r, st, up, native, body, cred)
 }
 
@@ -560,6 +565,7 @@ func (s *Server) finish(r *http.Request, tw *trackedWriter, st *reqState) {
 		StatusCode: tw.status, DurationMS: s.now().Sub(st.start).Milliseconds(),
 		UsageStatus: audit.UsageUnknown, FailureCode: st.failure,
 		PolicySHA256: auth.PolicySHA256, RegistrySHA256: auth.RegistrySHA256,
+		StreamUsageInjected: st.streamInject,
 	}
 	if known {
 		rec.UsageStatus = audit.UsageMeasured

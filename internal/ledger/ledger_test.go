@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -189,7 +188,8 @@ func TestTimeoutWhenLockHeld(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := syscall.Flock(int(holder.Fd()), syscall.LOCK_EX); err != nil {
+	defer func() { _ = holder.Close() }()
+	if err := lockWithContext(context.Background(), holder); err != nil {
 		t.Fatal(err)
 	}
 	if err := l.Settle("a", "run", 10, true); !errors.Is(err, ErrTimeout) {

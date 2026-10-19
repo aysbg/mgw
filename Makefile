@@ -12,7 +12,7 @@ GOVULN_VERSION   := v1.9.0
 GOSEC_VERSION    := v2.29.0
 GOBIN            ?= $(HOME)/.local/bin
 
-.PHONY: all tools fmt vet lint tidy test fuzz vuln sec build repro gates check clean
+.PHONY: all tools fmt vet lint tidy test fuzz vuln sec build cross-build repro release gates check clean
 
 all: check
 
@@ -73,6 +73,39 @@ sec:
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=true -ldflags "$(LDFLAGS)" -o dist/mgw ./cmd/mgw
 
+## cross-build catches platform-specific compile failures on a host-only check.
+cross-build:
+	GOOS=windows GOARCH=amd64 $(GO) build ./...
+	GOOS=darwin GOARCH=arm64 $(GO) build ./...
+
+## release refuses dirty sources. The commit timestamp makes separate runs reproducible.
+## No signing: publishing signature keys requires a CTO decision.
+release:
+	@set -eu; \
+	status=$$(git status --porcelain --untracked-files=all); \
+	if [ -n "$$status" ]; then \
+	  echo "release: refusing dirty tree (including untracked files)" >&2; exit 1; \
+	fi; \
+	version=$$(git describe --tags --always --dirty); \
+	commit=$$(git rev-parse --short HEAD); \
+	buildtime=$$(git show -s --format=%cI HEAD); \
+	flags="-s -w -X main.version=$$version -X main.commit=$$commit -X main.buildTime=$$buildtime"; \
+	mkdir -p dist; tmp=$$(mktemp -d dist/.release.XXXXXX); \
+	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
+	for target in linux-amd64 darwin-arm64 darwin-amd64 windows-amd64; do \
+	  os=$${target%-*}; arch=$${target#*-}; suffix=; \
+	  if [ "$$os" = windows ]; then suffix=.exe; fi; \
+	  echo "building $$target"; \
+	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch GOTOOLCHAIN=local $(GO) build -trimpath -buildvcs=true \
+	    -ldflags "$$flags" -o "$$tmp/mgw-$$version-$$target$$suffix" ./cmd/mgw; \
+	done; \
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOTOOLCHAIN=local $(GO) build -trimpath -buildvcs=true \
+	  -ldflags "$$flags" -o "$$tmp/repro" ./cmd/mgw; \
+	cmp "$$tmp/mgw-$$version-linux-amd64" "$$tmp/repro"; rm "$$tmp/repro"; \
+	(cd "$$tmp" && sha256sum mgw-* | LC_ALL=C sort -k2 > SHA256SUMS); \
+	rm -rf dist/release; mv "$$tmp" dist/release; \
+	echo "release: dist/release (UNSIGNED; Linux reproducibility verified)"
+
 ## repro builds twice and requires identical bytes.
 repro:
 	@mkdir -p dist
@@ -91,7 +124,7 @@ gates:
 	if [ $$miss -ne 0 ]; then exit 1; fi; \
 	echo "gate mapping ok"
 
-check: fmt vet lint tidy test fuzz vuln sec build repro gates
+check: fmt vet lint tidy test fuzz vuln sec build cross-build repro gates
 	@echo "make check: green"
 
 clean:

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 )
 
@@ -170,6 +169,9 @@ func (r *runState) totals() Totals {
 // errReadOnly tells update to skip the write. It never escapes update.
 var errReadOnly = errors.New("read only")
 
+// errLockBusy tells lockWithContext to retry a non-blocking lock attempt.
+var errLockBusy = errors.New("ledger lock busy")
+
 // update runs fn under the file lock and persists the result atomically. The
 // whole operation is bounded by the cleanup timeout and is detached from any
 // request context.
@@ -181,11 +183,12 @@ func (l *Ledger) update(fn func(*state) error) error {
 	if err != nil {
 		return fmt.Errorf("ledger: %w", err)
 	}
-	defer func() { _ = lock.Close() }() // closing the descriptor releases the flock
+	defer func() { _ = lock.Close() }()
 
 	if err := lockWithContext(ctx, lock); err != nil {
 		return err
 	}
+	defer func() { _ = unlockFile(lock) }()
 
 	s, err := l.load()
 	if err != nil {
@@ -203,17 +206,16 @@ func (l *Ledger) update(fn func(*state) error) error {
 	return l.store(s)
 }
 
-// lockWithContext takes an exclusive flock, polling so the wait can time out.
+// lockWithContext takes an exclusive file lock, polling so the wait can time out.
 func lockWithContext(ctx context.Context, f *os.File) error {
-	fd := int(f.Fd()) // #nosec G115 -- file descriptors fit in int
 	delay := time.Millisecond
 	for {
-		err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB)
+		err := tryLockFile(f)
 		if err == nil {
 			return nil
 		}
-		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
-			return fmt.Errorf("ledger: flock: %w", err)
+		if !errors.Is(err, errLockBusy) {
+			return err
 		}
 		t := time.NewTimer(delay)
 		select {

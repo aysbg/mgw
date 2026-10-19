@@ -191,7 +191,7 @@ func emitAuthority(routeFile, out string, deadline int64, deps Deps) (authorityO
 	rt := proxy.Runtime{
 		AuthorityFile: result.Authority, Providers: providers, LedgerDir: filepath.Join(out, "ledger"),
 		AuditFile: filepath.Join(out, "audit.jsonl"), ReadyFile: filepath.Join(out, "ready.json"),
-		CleanupTimeoutMS: 5000, DefaultReserveTokens: 2000, MaxReservationTokens: 8000,
+		CleanupTimeoutMS: 5000, DefaultReserveTokens: 2000, MaxReservationTokens: 2000,
 	}
 	authData, err := json.MarshalIndent(auth, "", "  ")
 	if err != nil {

@@ -18,6 +18,8 @@ const defaultCatalogURL = "https://models.dev/api.json"
 
 // Deps are the host dependencies of the commands, injectable for tests.
 type Deps struct {
+	// Build is the running binary's metadata, supplied by main's ldflags values.
+	Build  BuildInfo
 	Now    func() time.Time
 	Fetch  func(ctx context.Context, url string) ([]byte, string, error)
 	Getenv func(string) string

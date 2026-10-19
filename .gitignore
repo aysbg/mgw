@@ -2,3 +2,4 @@
 /mgw
 *.test
 coverage.out
+.opencode/

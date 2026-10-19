@@ -40,6 +40,15 @@ internal/audit   metadata-only audit records
 docs/gates.md    gate to test mapping
 ```
 
+## Provider base URLs
+
+A provider `base_url` can carry an API path prefix. The gateway preserves it
+verbatim: `https://openrouter.ai/api` plus `/v1/chat/completions` becomes
+`https://openrouter.ai/api/v1/chat/completions`. Host-root bases also work.
+Use HTTPS, with no trailing slash, query string, fragment, userinfo, `..` path
+segment, or double slash in the path. Only `http://127.0.0.1[:port]` is allowed
+for HTTP tests. See [runtime configuration](docs/runtime.md#provider-base-urls).
+
 ## Decision layer
 
 `mgw decide` asks a typed-decision model (Clef via Ollama Cloud, or Jev) for the

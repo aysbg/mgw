@@ -130,6 +130,27 @@ func TestProbePassesAllSteps(t *testing.T) {
 	}
 }
 
+func TestProbePreservesBaseURLPrefix(t *testing.T) {
+	f := &fakeUpstream{dialect: DialectOpenAI}
+	srv := httptest.NewServer(f.handler())
+	defer srv.Close()
+	res := Probe(context.Background(), target(srv.URL+"/%61pi", DialectOpenAI))
+	if !res.Usable() || !res.StreamUsage.OK() || res.ToolGrade != GradePass {
+		t.Fatalf("probe with a prefix failed: %+v", res)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, got := range f.seen {
+		want := "POST /api/v1/chat/completions"
+		if i == 0 {
+			want = "GET /api/v1/models"
+		}
+		if got != want {
+			t.Errorf("request %d = %q, want %q", i, got, want)
+		}
+	}
+}
+
 func TestProbeFailureModesNeverLeakTheKey(t *testing.T) {
 	cases := []struct {
 		name      string

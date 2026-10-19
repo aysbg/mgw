@@ -31,8 +31,8 @@ func TestValidate(t *testing.T) {
 		{"http remote", mut(func(p *Provider) { p.BaseURL = "http://api.example.com" }), "127.0.0.1"},
 		{"http localhost name", mut(func(p *Provider) { p.BaseURL = "http://localhost:1" }), "127.0.0.1"},
 		{"ftp", mut(func(p *Provider) { p.BaseURL = "ftp://x" }), "https"},
-		{"path", mut(func(p *Provider) { p.BaseURL = "https://x.example/v1" }), "scheme and host only"},
-		{"userinfo", mut(func(p *Provider) { p.BaseURL = "https://u:p@x.example" }), "scheme and host only"},
+		{"path", mut(func(p *Provider) { p.BaseURL = "https://x.example/v1" }), ""},
+		{"userinfo", mut(func(p *Provider) { p.BaseURL = "https://u:p@x.example" }), "userinfo"},
 		{"no host", mut(func(p *Provider) { p.BaseURL = "https://" }), "no host"},
 		{"empty cred", mut(func(p *Provider) { p.CredentialFile = "" }), "credential_file"},
 		{"zero connect", mut(func(p *Provider) { p.Timeouts.ConnectMS = 0 }), "timeout"},
@@ -48,6 +48,56 @@ func TestValidate(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			case tc.bad != "" && (err == nil || !strings.Contains(err.Error(), tc.bad)):
 				t.Fatalf("want error containing %q, got %v", tc.bad, err)
+			}
+		})
+	}
+}
+
+func TestValidateBaseURLPrefixes(t *testing.T) {
+	for _, base := range []string{
+		"https://openrouter.ai/api",
+		"https://openrouter.ai/api/v1",
+		"https://azure.example/openai/deployments/gpt-4",
+		"https://proxy.example:8443/gateway/provider",
+		"https://proxy.example/a%20b/%61pi",
+		"https://proxy.example/version..2",
+		"http://127.0.0.1:8080/api",
+	} {
+		t.Run(base, func(t *testing.T) {
+			p := good()
+			p.BaseURL = base
+			if err := p.Validate(); err != nil {
+				t.Fatalf("valid prefix rejected: %v", err)
+			}
+			if p.BaseURL != base {
+				t.Fatalf("base_url changed: %q", p.BaseURL)
+			}
+		})
+	}
+	for _, tc := range []struct{ base, want string }{
+		{"https://x.example/api?key=value", "query string"},
+		{"https://x.example/api?", "query string"},
+		{"https://x.example/api#fragment", "fragment"},
+		{"https://x.example/api#", "fragment"},
+		{"https://x.example/api/../v1", "'..' path segment"},
+		{"https://x.example/..", "'..' path segment"},
+		{"https://x.example/api/%2e%2E/v1", "'..' path segment"},
+		{"https://x.example/api%2f..%2fv1", "'..' path segment"},
+		{"https://x.example/", "trailing slash"},
+		{"https://x.example/api/", "trailing slash"},
+		{"https://x.example/api%2f", "trailing slash"},
+		{"https://x.example/api//v1", "double slash"},
+		{"https://x.example//api", "double slash"},
+		{"https://x.example/api/%2fv1", "double slash"},
+		{"https://u:p@x.example/api", "userinfo"},
+		{"http://x.example/api", "127.0.0.1"},
+		{"http://localhost/api", "127.0.0.1"},
+		{"ftp://x.example/api", "https"},
+	} {
+		t.Run(tc.base, func(t *testing.T) {
+			err := ValidateEndpoint("openrouter", DialectOpenRouter, tc.base)
+			if err == nil || !strings.Contains(err.Error(), `provider "openrouter":`) || !strings.Contains(err.Error(), "base_url") || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want named base_url error containing %q, got %v", tc.want, err)
 			}
 		})
 	}

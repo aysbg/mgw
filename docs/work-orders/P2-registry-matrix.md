@@ -67,40 +67,40 @@ if decoded as a float.
 
 ## 2. `internal/catalog/capabilities.json`
 
-Curated data. Seed exactly this (ids match the harness registry; prices are not
-here — they come from the catalog):
+Curated data. The `fixture_price` column is the blended price at 90/10 in
+micro-USD per 1M tokens; it exists so Gate 8 has a fixed, stated input instead of
+guessing. The live catalog supplies prices in normal operation.
 
-| id | provider | family | tier | roles_allowed | efforts | prohibited |
-|---|---|---|---|---|---|---|
-| anthropic/claude-opus-5-5 | anthropic | anthropic | top | build,plan,review,advise,explore | low,medium,high,xhigh | — |
-| openai/gpt-6-astra | openai | openai | top | build,plan,review,advise,explore | low,medium,high,xhigh | low |
-| openai/gpt-6.1-sol | openai | openai | very_good | all five | low,medium,high,xhigh | — |
-| anthropic/claude-sonnet-5-5 | anthropic | anthropic | very_good | all five | low,medium,high,xhigh | — |
-| ollama-cloud/kimi-k3 | ollama-cloud | moonshot | very_good | plan,review,advise | low,high | — |
-| ollama-cloud/glm-5.3 | ollama-cloud | glm | good | all five | low,high | — |
-| anthropic/claude-haiku-5-5 | anthropic | anthropic | good | all five | low,medium,high,xhigh | — |
-| ollama-cloud/glm-5.3-flash | ollama-cloud | glm | cheap | all five | low,high | — |
-| openai/gpt-6-luna | openai | openai | cheap | all five | low,medium,high,xhigh | — |
-| ollama-cloud/deepseek-v4.1-flash:1017 | ollama-cloud | deepseek | cheap | all five | low,medium,high,xhigh | — |
+`roles_allowed` must equal exactly the roles with a non-zero rank. That is the
+validation rule, and the rank of 0 is what marks a role ineligible.
 
-`role_rank` per role, 0-100, higher is better. This is curated judgement, not a
-derivation:
+| id | provider | family | tier | build | plan | review | advise | explore | fixture_price |
+|---|---|---|---|---|---|---|---|---|---|
+| anthropic/claude-opus-5-5 | anthropic | anthropic | top | 90 | 95 | 95 | 96 | 0 | 5600000 |
+| openai/gpt-6-astra | openai | openai | top | 95 | 95 | 92 | 94 | 0 | 14000000 |
+| openai/gpt-6.1-sol | openai | openai | very_good | 80 | 82 | 80 | 60 | 0 | 2800000 |
+| anthropic/claude-sonnet-5-5 | anthropic | anthropic | very_good | 78 | 80 | 85 | 65 | 0 | 2800000 |
+| ollama-cloud/kimi-k3 | ollama-cloud | moonshot | very_good | 0 | 75 | 72 | 70 | 0 | 4200000 |
+| ollama-cloud/glm-5.3 | ollama-cloud | glm | good | 60 | 58 | 40 | 28 | 20 | 1700000 |
+| anthropic/claude-haiku-5-5 | anthropic | anthropic | good | 40 | 38 | 45 | 30 | 25 | 140000 |
+| ollama-cloud/glm-5.3-flash | ollama-cloud | glm | cheap | 25 | 20 | 0 | 0 | 30 | 185000 |
+| openai/gpt-6-luna | openai | openai | cheap | 30 | 25 | 0 | 0 | 28 | 140000 |
+| ollama-cloud/deepseek-v4.1-flash:1017 | ollama-cloud | deepseek | cheap | 28 | 22 | 0 | 0 | 35 | 195000 |
 
-| id | build | plan | review | advise | explore |
-|---|---|---|---|---|---|
-| claude-opus-5-5 | 90 | 95 | 95 | 96 | 0 |
-| gpt-6-astra | 95 | 95 | 92 | 94 | 0 |
-| gpt-6.1-sol | 80 | 82 | 80 | 60 | 0 |
-| claude-sonnet-5-5 | 78 | 80 | 85 | 65 | 0 |
-| kimi-k3 | 0 | 75 | 72 | 70 | 0 |
-| glm-5.3 | 60 | 58 | 40 | 28 | 20 |
-| claude-haiku-5-5 | 40 | 38 | 45 | 30 | 25 |
-| glm-5.3-flash | 25 | 20 | 0 | 0 | 30 |
-| gpt-6-luna | 30 | 25 | 0 | 0 | 28 |
-| deepseek-v4.1-flash:1017 | 28 | 22 | 0 | 0 | 35 |
+Efforts and prohibitions:
 
-A rank of 0 means the seat is not eligible for that role; `roles_allowed` is the
-authority, and a rank of 0 on an allowed role is a validation error.
+| id | efforts | prohibited |
+|---|---|---|
+| claude-opus-5-5 | low,medium,high,xhigh | — |
+| gpt-6-astra | low,medium,high,xhigh | low |
+| gpt-6.1-sol | low,medium,high,xhigh | — |
+| claude-sonnet-5-5 | low,medium,high,xhigh | — |
+| kimi-k3 | low,high | — |
+| glm-5.3 | low,high | — |
+| claude-haiku-5-5 | low,medium,high,xhigh | — |
+| glm-5.3-flash | low,high | — |
+| gpt-6-luna | low,medium,high,xhigh | — |
+| deepseek-v4.1-flash:1017 | low,medium,high,xhigh | — |
 
 The `:1017` suffix is part of the model id, not decoration. The catalog lists
 `deepseek-v4.1-flash` and `deepseek-v4.1-flash:1017` as separate entries, so an
@@ -127,7 +127,8 @@ type Registry struct {
 
 Validation, each with a named error:
 
-- unknown tier; rank 0 on an allowed role; rank > 0 on a disallowed role
+- unknown tier; `roles_allowed` not exactly equal to the roles with a non-zero
+  rank; a rank above 100 or below 0
 - `roles_allowed` missing a role that appears in the strategy grid
 - a model absent from the catalog (`unrated`), which must be listed and never
   routed
@@ -144,18 +145,25 @@ migration) × `size` (S, M, L) × `risk` (false, true) × `strategy` (cheapest,
 balanced, best). 630 cells. Key format:
 `<role>|<type>|<size>|<risk>|<strategy>`.
 
-Target tiers:
+Target tiers, one rule per strategy:
 
-| role | cheapest | balanced | best |
-|---|---|---|---|
-| build | cheap | good | best available |
-| plan | good | good | top |
-| review | good | very_good | top |
-| advise | good | very_good | top |
-| explore | cheap | cheap | cheap |
+- `cheapest` — a fixed tier per role: build cheap, plan good, review good,
+  advise good, explore cheap. Complexity type and size do not move it.
+- `balanced` — the existing complexity ladder, unchanged from the harness
+  router: `level = TYPE_TIERS[type] + (size == L)`, `tier = max(floor, min(top,
+  level))`, with `TYPE_TIERS = {docs:cheap, test_only:cheap, scaffold:good,
+  bugfix:good, feature:very_good, refactor:very_good, migration:very_good}` and
+  `floors = {build:cheap, plan:good, review:very_good, advise:top,
+  explore:cheap}`. The ladder applies to build and plan; review and advise use
+  their floor. Explore is fixed at cheap by its floor, so the ladder cannot move
+  it.
+- `best` — build: the highest `role_rank` among seats allowed for build,
+  regardless of tier. plan, review, advise: top. explore: cheap.
 
-`best available` means the highest `role_rank` among seats allowed for the role,
-regardless of tier.
+The balanced rule is the ladder, not the summary row in an earlier draft of this
+order. Where the two disagreed, the ladder is correct: it is what the harness
+does today, and a gateway that routes differently from the harness would change
+behaviour silently.
 
 `cheapest_min_rank`, pinned data alongside the strategy targets:
 
@@ -167,18 +175,9 @@ regardless of tier.
 | advise | 26 |
 | explore | 0 |
 
-This is what makes the worked example hold: `glm-5.3-flash` has build rank 25 and
-is excluded from a cheap build, while `deepseek-v4.1-flash:1017` at 28 survives; both
-clear the explore floor, so price decides and `glm-5.3-flash` wins there.
-
-Balanced applies the existing complexity ladder: `level = TYPE_TIERS[type] +
-(size == L)`, `tier = max(floor, min(top, level))` with
-`TYPE_TIERS = {docs:cheap, test_only:cheap, scaffold:good, bugfix:good,
-feature:very_good, refactor:very_good, migration:very_good}` and
-`floors = {build:cheap, plan:good, review:very_good, advise:top, explore:cheap}`.
-Note that `balanced` targets in the table above override the floor where they
-differ only when the floor is unreachable; the generated cell records the target
-and the achieved tier.
+That floor is what makes the worked example hold: `glm-5.3-flash` has build rank
+25 and is excluded from a cheap build, while `deepseek-v4.1-flash:1017` at 28
+survives; both clear the explore floor, so price decides there.
 
 Resolution order inside one cell:
 
@@ -232,20 +231,29 @@ cells. Column widths computed from content.
 
 ## 6. Tests
 
-- **Gate 8 — matrix fidelity.** A fixture catalog plus the seed capabilities must
-  produce an exact expected table for the Ollama-only install:
+- **Gate 8 — matrix fidelity.** Fixture catalog plus the seed capabilities, the
+  Ollama-only install, default cell `feature`/`M`/no risk:
 
   | role | cheapest | balanced | best |
   |---|---|---|---|
   | build | deepseek-v4.1-flash:1017 | glm-5.3 | glm-5.3 |
-  | plan | glm-5.3 | glm-5.3 | kimi-k3 |
+  | plan | glm-5.3 | kimi-k3 | kimi-k3 |
   | review | glm-5.3 | kimi-k3 | kimi-k3 |
   | advise | glm-5.3 | kimi-k3 | kimi-k3 |
   | explore | glm-5.3-flash | deepseek-v4.1-flash:1017 | deepseek-v4.1-flash:1017 |
 
-  Asserted for the default cell (`feature`, `M`, no risk). Also assert one
-  multi-provider fixture where `cheapest` keeps the work on the preferred
-  provider while `balanced` reaches for the higher-ranked seat elsewhere.
+  Two cells are worth understanding rather than memorising:
+
+  - `balanced` build is `glm-5.3`, not `kimi-k3`: the ladder targets very_good,
+    no very_good seat is allowed to build, so the cell degrades to the nearest
+    tier, good.
+  - `balanced` plan is `kimi-k3`: the same ladder reaches very_good, and kimi is
+    allowed to plan.
+
+  Also assert one multi-provider fixture where `cheapest` keeps the work on the
+  preferred provider while `balanced` reaches for the higher-ranked seat
+  elsewhere.
+
 - **Gate 13 — parity.** The three fixtures above, plus a full registry hash
   round-trip.
 - **Gate 7 — routing guards, static half.** A seat with rank 0 on a disallowed

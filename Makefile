@@ -12,7 +12,7 @@ GOVULN_VERSION   := v1.9.0
 GOSEC_VERSION    := v2.29.0
 GOBIN            ?= $(HOME)/.local/bin
 
-.PHONY: all tools fmt vet lint tidy test fuzz vuln sec build repro release gates check clean
+.PHONY: all tools fmt vet lint tidy test fuzz vuln sec build cross-build repro release gates check clean
 
 all: check
 
@@ -73,6 +73,11 @@ sec:
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=true -ldflags "$(LDFLAGS)" -o dist/mgw ./cmd/mgw
 
+## cross-build catches platform-specific compile failures on a host-only check.
+cross-build:
+	GOOS=windows GOARCH=amd64 $(GO) build ./...
+	GOOS=darwin GOARCH=arm64 $(GO) build ./...
+
 ## release refuses dirty sources. The commit timestamp makes separate runs reproducible.
 ## No signing: publishing signature keys requires a CTO decision.
 release:
@@ -119,7 +124,7 @@ gates:
 	if [ $$miss -ne 0 ]; then exit 1; fi; \
 	echo "gate mapping ok"
 
-check: fmt vet lint tidy test fuzz vuln sec build repro gates
+check: fmt vet lint tidy test fuzz vuln sec build cross-build repro gates
 	@echo "make check: green"
 
 clean:

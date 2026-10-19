@@ -66,6 +66,21 @@ A degraded size is not a failure: it is the normal outcome on non-trivial work,
 and the run record says so. The reported `confidence` field is telemetry and
 never decides anything.
 
+## Deployment scope
+
+This gateway exists for **client hosts and consulting engagements**, not as the
+default path for our own repository work. Internal model-to-role assignment lives
+in opencode's own configuration, which is more direct than proxying it.
+
+Use gateway mode when these properties are the point: a lane that holds a
+run-scoped token and never a provider key, request-level usage measurement, a
+per-engagement profile carrying strategy and provider policy, and one API key set
+serving every family an engagement may use.
+
+Using direct mode forgoes authoritative per-request accounting and in-lane
+credential isolation. Neither is a requirement for internal work today; the mode
+is per dispatch, so it is not all-or-nothing.
+
 ## Security invariants
 
 - Provider keys never enter a lane. The lane holds a run-scoped token only.

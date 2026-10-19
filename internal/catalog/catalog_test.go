@@ -234,8 +234,22 @@ func TestCapabilitiesEmbedded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(caps.Models) != 10 {
+	// 10 curated seats plus 6 OpenRouter mirrors of the frontier seats. The mirrors
+	// exist so a host whose only API keys are Ollama Cloud and OpenRouter can still
+	// route the OpenAI and Anthropic families; they carry the same family and ranks.
+	if len(caps.Models) != 16 {
 		t.Fatalf("models = %d", len(caps.Models))
+	}
+	for _, id := range []string{"openrouter/openai/gpt-6.1-sol", "openrouter/anthropic/claude-sonnet-5.5"} {
+		var ok bool
+		for _, m := range caps.Models {
+			if m.ID == id && m.Provider == "openrouter" {
+				ok = true
+			}
+		}
+		if !ok {
+			t.Errorf("expected OpenRouter mirror %s", id)
+		}
 	}
 	var found bool
 	for _, m := range caps.Models {

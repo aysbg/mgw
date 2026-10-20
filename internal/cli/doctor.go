@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,6 +21,20 @@ import (
 	"github.com/aysbg/mgw/internal/provider"
 )
 
+// doctorCheck is one line of the doctor report. The table spells a failure
+// "FAIL"; JSON carries the machine-readable "fail".
+type doctorCheck struct {
+	Level  string `json:"level"`
+	Name   string `json:"name"`
+	Detail string `json:"detail"`
+}
+
+// doctorReport is the JSON shape of `mgw doctor --json`.
+type doctorReport struct {
+	OK     bool          `json:"ok"`
+	Checks []doctorCheck `json:"checks"`
+}
+
 // Doctor implements `mgw doctor`. Each check prints ok, warn or FAIL and any FAIL
 // makes the exit code non-zero: the config directory and its credential files,
 // the CA bundle, the pinned registry, the pricing snapshot age, the catalog
@@ -32,6 +47,7 @@ func Doctor(args []string, stdout, stderr io.Writer, deps Deps) int {
 	registry := fs.String("registry", deps.defaultRegistry(), "pinned registry path")
 	network := fs.Bool("network", false, "also check that the catalog is reachable")
 	catalogURL := fs.String("catalog-url", defaultCatalogURL, "catalog URL for --network")
+	jsonOut := fs.Bool("json", false, "print the diagnostic result as JSON")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return ExitOK
@@ -39,9 +55,11 @@ func Doctor(args []string, stdout, stderr io.Writer, deps Deps) int {
 		return ExitUsage
 	}
 	var rows [][]string
+	checks := make([]doctorCheck, 0, 12)
 	failed := false
 	add := func(level, name, detail string) {
 		rows = append(rows, []string{fmt.Sprintf("%-6s%s", level, name), detail})
+		checks = append(checks, doctorCheck{Level: strings.ToLower(level), Name: name, Detail: detail})
 		if level == "FAIL" || level == "fail" {
 			failed = true
 		}
@@ -69,7 +87,13 @@ func Doctor(args []string, stdout, stderr io.Writer, deps Deps) int {
 		checkToolGrade(add, *registry, cfg)
 		checkStrategy(add, dir, cfg, deps)
 	}
-	printTable(stdout, rows)
+	if *jsonOut {
+		// The report holds only strings and bools, so Marshal cannot fail.
+		data, _ := json.Marshal(doctorReport{OK: !failed, Checks: checks})
+		_, _ = fmt.Fprintln(stdout, string(data))
+	} else {
+		printTable(stdout, rows)
+	}
 	if failed {
 		return ExitError
 	}

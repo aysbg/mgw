@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -67,6 +68,7 @@ func loadInstall(deps Deps) (string, *config.Config, error) {
 func providersList(args []string, stdout, stderr io.Writer, deps Deps) int {
 	fs := flag.NewFlagSet("providers list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "print the provider list as JSON")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return ExitOK
@@ -76,6 +78,12 @@ func providersList(args []string, stdout, stderr io.Writer, deps Deps) int {
 	dir, cfg, err := loadInstall(deps)
 	if err != nil {
 		return fail(stderr, "providers list", err)
+	}
+	if *asJSON {
+		if err := writeProvidersJSON(stdout, dir, cfg); err != nil {
+			return fail(stderr, "providers list", err)
+		}
+		return ExitOK
 	}
 	rows := [][]string{{"ID", "DIALECT", "BILLING", "KEY", "PROBE"}}
 	for _, p := range cfg.Providers {
@@ -90,6 +98,37 @@ func providersList(args []string, stdout, stderr io.Writer, deps Deps) int {
 	}
 	printTable(stdout, rows)
 	return ExitOK
+}
+
+// providerListEntry is one provider of `mgw providers list -json`. Its fields
+// carry the values the table shows, in the table's column order.
+type providerListEntry struct {
+	ID        string              `json:"id"`
+	Dialect   provider.Dialect    `json:"dialect"`
+	Billing   string              `json:"billing"`
+	KeyState  string              `json:"key_state"`
+	ToolGrade string              `json:"tool_grade"`
+	Probe     *config.ProbeRecord `json:"probe"`
+}
+
+// writeProvidersJSON writes the provider list as one JSON object. The config
+// order is preserved, tool_grade is always present, and probe is null when the
+// provider has no probe recorded.
+func writeProvidersJSON(w io.Writer, dir string, cfg *config.Config) error {
+	entries := make([]providerListEntry, 0, len(cfg.Providers))
+	for _, p := range cfg.Providers {
+		entries = append(entries, providerListEntry{
+			ID:        p.ID,
+			Dialect:   p.Dialect,
+			Billing:   p.Billing,
+			KeyState:  keyState(dir, p.ID),
+			ToolGrade: p.ToolGrade,
+			Probe:     p.Probe,
+		})
+	}
+	return json.NewEncoder(w).Encode(struct {
+		Providers []providerListEntry `json:"providers"`
+	}{entries})
 }
 
 func providersTest(args []string, stdout, stderr io.Writer, deps Deps) int {

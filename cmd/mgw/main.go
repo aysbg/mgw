@@ -34,6 +34,7 @@ Commands:
   strategy   Show or set the model strategy
   matrix     Print the capability matrix
   pricing    Refresh the pricing snapshot
+  catalog    Diff the library against the upstream catalog
   doctor     Check the host and the pinned artifacts
   decide     Classify a state file or record a shadow decision
   version    Print version information
@@ -62,7 +63,7 @@ func main() {
 		deps := cli.DefaultDeps()
 		deps.ConfigDir = g.ConfigDir
 		os.Exit(cli.Authority(rest[1:], os.Stdout, os.Stderr, deps))
-	case "init", "providers", "strategy", "matrix", "pricing", "doctor", "decide":
+	case "init", "providers", "strategy", "matrix", "pricing", "catalog", "doctor", "decide":
 		deps := cli.DefaultDeps()
 		deps.Build = cli.BuildInfo{Version: version, Commit: commit, BuildTime: buildTime}
 		os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr, deps))

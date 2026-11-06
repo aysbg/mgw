@@ -1,0 +1,31 @@
+{
+  "openrouter": {
+    "models": {
+      "openai/gpt-6-astra": {"tool_call":true,"reasoning":true,"limit":{"context":200000},"modalities":{"output":["text"]}},
+      "openai/gpt-6.1-sol": {},
+      "openai/gpt-6-luna": {},
+      "anthropic/claude-opus-5.5": {},
+      "anthropic/claude-sonnet-5.5": {},
+      "anthropic/claude-haiku-5.5": {},
+      "moonshotai/kimi-k3.1-pro": {"tool_call":true,"reasoning":true,"limit":{"context":256000},"modalities":{"output":["text"]},"cost":{"input":0.5,"output":2}},
+      "~alias": {"tool_call":true,"reasoning":true,"limit":{"context":256000},"modalities":{"output":["text"]}}
+    }
+  },
+  "ollama-cloud": {
+    "models": {
+      "kimi-k3": {},
+      "glm-5.3": {},
+      "glm-5.3-flash": {},
+      "deepseek-v4.1-flash:1017": {},
+      "zeta": {"tool_call":true,"reasoning":true,"limit":{"context":200000},"modalities":{"output":["text"]}},
+      "alpha": {"tool_call":true,"reasoning":true,"limit":{"context":100000},"modalities":{"output":["text"]},"cost":{"input":0.15,"output":0.6}},
+      "small": {"tool_call":true,"reasoning":true,"limit":{"context":99999},"modalities":{"output":["text"]}},
+      "no-tools": {"reasoning":true,"limit":{"context":200000},"modalities":{"output":["text"]}},
+      "no-reasoning": {"tool_call":true,"limit":{"context":200000},"modalities":{"output":["text"]}},
+      "image": {"tool_call":true,"reasoning":true,"limit":{"context":200000},"modalities":{"output":["text","image"]}}
+    }
+  },
+  "openai": {"models":{"gpt-6-astra":{},"gpt-6.1-sol":{},"gpt-6-luna":{}}},
+  "anthropic": {"models":{"claude-opus-5-5":{},"claude-sonnet-5-5":{},"claude-haiku-5-5":{}}},
+  "unroutable": {"models":{"outside": {"tool_call":true,"reasoning":true,"limit":{"context":256000},"modalities":{"output":["text"]}}}}
+}

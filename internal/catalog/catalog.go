@@ -28,7 +28,8 @@ const (
 	// StaleAfter is the age after which a snapshot is reported as stale.
 	StaleAfter = 30 * 24 * time.Hour
 
-	minAgentContext = 100000
+	// MinAgentContext is the minimum context size for a coding-agent seat.
+	MinAgentContext = 100000
 	// maxMicro bounds one decoded price: 1,000,000 USD per 1M tokens. It keeps
 	// the blend arithmetic far from int64 overflow.
 	maxMicro = 1_000_000 * 1_000_000
@@ -223,7 +224,7 @@ func (c *Catalog) Lookup(fullID string) (Model, bool) {
 // AgentCapable reports whether a model can serve as a coding-agent seat: tool
 // calls, reasoning, a context of at least 100000 tokens, and text-only output.
 func AgentCapable(m Model) bool {
-	return m.ToolCall && m.Reasoning && m.ContextLimit >= minAgentContext &&
+	return m.ToolCall && m.Reasoning && m.ContextLimit >= MinAgentContext &&
 		len(m.OutputModalities) == 1 && m.OutputModalities[0] == "text"
 }
 

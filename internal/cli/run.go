@@ -47,7 +47,7 @@ func ParseGlobal(args []string) (Global, []string, error) {
 }
 
 // Run parses the global flags and dispatches the install and decision commands:
-// init, providers, strategy, matrix, pricing, doctor and decide. It is the entry point
+// init, providers, strategy, matrix, pricing, catalog, doctor and decide. It is the entry point
 // cmd/mgw uses, so tests that call it drive the real command path.
 func Run(args []string, stdout, stderr io.Writer, deps Deps) int {
 	g, rest, err := ParseGlobal(args)
@@ -71,6 +71,8 @@ func Run(args []string, stdout, stderr io.Writer, deps Deps) int {
 		return Matrix(tail, stdout, stderr, deps)
 	case "pricing":
 		return Pricing(tail, stdout, stderr, deps)
+	case "catalog":
+		return Catalog(tail, stdout, stderr, deps)
 	case "doctor":
 		return Doctor(tail, stdout, stderr, deps)
 	case "decide":

@@ -27,3 +27,7 @@ A mismatch produces a warning, not a failure. An older registry can remain valid
 A missing, invalid or stale build pin also produces a warning on a release build.
 Local builds without commit metadata cannot compare commits.
 The build pin is diagnostic metadata, not a signature or proof of publisher identity.
+
+`mgw doctor` also verifies the pricing snapshot against `pricing.json.sha256` and reports whether the catalog digest
+was approved. A pin mismatch is a failure; an unapproved first-use digest is a warning. See the README section
+"Catalog and pricing provenance".

@@ -2,11 +2,14 @@ package cli
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/aysbg/mgw/internal/catalog"
 	"github.com/aysbg/mgw/internal/parity"
 	"github.com/aysbg/mgw/internal/policy"
 )
@@ -29,6 +32,7 @@ func TestGate09_InitWritesFilesWithModesAndMatrixWorksFromThem(t *testing.T) {
 	assertMode(t, o.path("credentials", "ollama-cloud.key"), 0o600)
 	assertMode(t, o.path("registry.json"), 0o644)
 	assertMode(t, o.path("pricing.json"), 0o644)
+	assertMode(t, o.path("pricing.json.sha256"), 0o644)
 
 	if got := readFileT(t, o.path("credentials", "openai.key")); got != keyOpenAI+"\n" {
 		t.Fatalf("credential file content %q", got)
@@ -65,6 +69,14 @@ func TestGate09_InitWritesFilesWithModesAndMatrixWorksFromThem(t *testing.T) {
 	}
 	if pin := readFileT(t, o.path("registry.json.sha256")); !strings.HasPrefix(pin, parity.SHA256Hex(data)) {
 		t.Fatalf("pin %q", pin)
+	}
+	pricing := []byte(readFileT(t, o.path("pricing.json")))
+	pricingPin := readFileT(t, o.path("pricing.json.sha256"))
+	if !strings.HasPrefix(pricingPin, fmt.Sprintf("%x", sha256.Sum256(pricing))) {
+		t.Fatalf("pricing pin %q", pricingPin)
+	}
+	if want := fmt.Sprintf("%x  pricing.json\n", sha256.Sum256(pricing)); pricingPin != want {
+		t.Fatalf("pricing pin %q, want %q", pricingPin, want)
 	}
 
 	// A subsequent matrix works from what init wrote: no flags, no snapshot path.
@@ -113,7 +125,7 @@ func TestGate09_IdempotentAcrossTwoRunsAndKeepsExistingProviders(t *testing.T) {
 	o := newOnboarding(t)
 	o.mustInit()
 	snap := map[string]string{}
-	files := []string{"config.json", "registry.json", "registry.json.sha256", "pricing.json", "credentials/openai.key", "credentials/ollama-cloud.key"}
+	files := []string{"config.json", "registry.json", "registry.json.sha256", "pricing.json", "pricing.json.sha256", "credentials/openai.key", "credentials/ollama-cloud.key"}
 	for _, f := range files {
 		snap[f] = readFileT(t, o.path(f))
 	}
@@ -152,6 +164,61 @@ func TestGate09_IdempotentAcrossTwoRunsAndKeepsExistingProviders(t *testing.T) {
 	reg, err := policy.DecodeRegistry([]byte(readFileT(t, o.path("registry.json"))))
 	if err != nil || len(reg.Providers) != 3 {
 		t.Fatalf("registry providers %v %v", reg, err)
+	}
+}
+
+func TestGate09_CatalogProvenanceWrites(t *testing.T) {
+	sourceDigest := fmt.Sprintf("%x", sha256.Sum256(fixtureBytes(t)))
+	for _, tc := range []struct {
+		name     string
+		pin      string
+		approved bool
+	}{
+		{"first use", "", false},
+		{"approved", sourceDigest, true},
+		{"wrong pin", strings.Repeat("0", 64), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := newOnboarding(t)
+			args := o.initArgs()
+			if tc.pin != "" {
+				args = append(args, "--catalog-sha256", tc.pin)
+			}
+			code, out, errs := o.run(args...)
+			if tc.name == "wrong pin" {
+				if code != ExitError || !strings.Contains(errs, "digest does not match") || exists(o.dir) {
+					t.Fatalf("wrong-pin refusal: %d %s %s, directory exists=%v", code, out, errs, exists(o.dir))
+				}
+				return
+			}
+			if code != ExitOK {
+				t.Fatalf("init: %d %s %s", code, out, errs)
+			}
+			for _, name := range []string{"pricing.json", "pricing.json.sha256"} {
+				assertMode(t, o.path(name), 0o644)
+				if !strings.Contains(out, name+" (0644)") || !strings.Contains(out, "wrote "+o.path(name)+"\n") {
+					t.Fatalf("missing plan or written path for %s: %s", name, out)
+				}
+			}
+			data := []byte(readFileT(t, o.path("pricing.json")))
+			wantPin := fmt.Sprintf("%x  pricing.json\n", sha256.Sum256(data))
+			if got := readFileT(t, o.path("pricing.json.sha256")); got != wantPin {
+				t.Fatalf("pin %q, want %q", got, wantPin)
+			}
+			s, err := catalog.ReadSnapshot(data)
+			if err != nil || s.SourceSHA256 != sourceDigest || s.Pinned != tc.approved {
+				t.Fatalf("snapshot %+v, err %v", s, err)
+			}
+			line := "catalog sha256 " + sourceDigest
+			if !tc.approved {
+				line += " (not pinned; pass --catalog-sha256 to pin it)"
+			} else if strings.Contains(out, "(not pinned;") {
+				t.Fatalf("approved catalog reported first use: %s", out)
+			}
+			if !strings.Contains(out, line+"\n") {
+				t.Fatalf("missing catalog line %q: %s", line, out)
+			}
+		})
 	}
 }
 

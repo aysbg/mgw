@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -145,7 +146,7 @@ func TestMedianEvenCountFloors(t *testing.T) {
 func TestSnapshot(t *testing.T) {
 	c, raw := loadFixture(t)
 	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
-	s := NewSnapshot(c, "https://example.test/api.json", Digest(raw), now)
+	s := NewSnapshot(c, "https://example.test/api.json", Digest(raw), now, true)
 	if s.CapturedAt != "2026-10-19T12:00:00Z" || s.Blend != BlendLabel || s.Population != PopulationAgentCapable {
 		t.Fatalf("header: %+v", s)
 	}
@@ -180,7 +181,7 @@ func TestSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b2, _ := json.Marshal(NewSnapshot(c, "https://example.test/api.json", Digest(raw), now))
+	b2, _ := json.Marshal(NewSnapshot(c, "https://example.test/api.json", Digest(raw), now, true))
 	if string(b1) != string(b2) {
 		t.Fatal("snapshot not deterministic")
 	}
@@ -345,7 +346,7 @@ func FuzzDecodeCatalog(f *testing.F) {
 		if err != nil {
 			return
 		}
-		s := NewSnapshot(c, "u", Digest(data), time.Unix(0, 0).UTC())
+		s := NewSnapshot(c, "u", Digest(data), time.Unix(0, 0).UTC(), true)
 		for _, m := range s.Models {
 			if m.BlendedMicroUSD < 0 {
 				t.Fatalf("negative price: %+v", m)
@@ -360,4 +361,56 @@ func FuzzDecodeCatalog(f *testing.F) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func TestSnapshotPinnedCompatibility(t *testing.T) {
+	c, raw := loadFixture(t)
+	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	approved := NewSnapshot(c, "https://example.test/api.json", Digest(raw), now, true)
+	firstUse := NewSnapshot(c, "https://example.test/api.json", Digest(raw), now, false)
+	if !approved.Pinned || firstUse.Pinned {
+		t.Fatal("constructor did not preserve approval")
+	}
+	for _, s := range []Snapshot{approved, firstUse} {
+		data, err := json.Marshal(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := `"pinned":false`
+		if s.Pinned {
+			want = `"pinned":true`
+		}
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("missing explicit approval %s: %s", want, data)
+		}
+		back, err := ReadSnapshot(data)
+		if err != nil || !reflect.DeepEqual(back, s) {
+			t.Fatalf("round trip: %+v, %v", back, err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(data, &fields); err != nil {
+			t.Fatal(err)
+		}
+		delete(fields, "pinned")
+		old, err := json.Marshal(fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		back, err = ReadSnapshot(old)
+		if err != nil || !reflect.DeepEqual(back, firstUse) {
+			t.Fatalf("old snapshot changed content: %+v, %v", back, err)
+		}
+		fields["unrelated"] = json.RawMessage(`true`)
+		unknown, err := json.Marshal(fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ReadSnapshot(unknown); err == nil || !strings.Contains(err.Error(), "unknown field") {
+			t.Fatalf("unknown field accepted: %v", err)
+		}
+	}
+	approved.Pinned = false
+	if !reflect.DeepEqual(approved, firstUse) {
+		t.Fatal("approval changed other snapshot content")
+	}
 }

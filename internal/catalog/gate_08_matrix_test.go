@@ -24,7 +24,7 @@ func buildInstall(t *testing.T, providers ...string) *policy.Registry {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snap := catalog.NewSnapshot(c, "fixture", catalog.Digest(raw), time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC))
+	snap := catalog.NewSnapshot(c, "fixture", catalog.Digest(raw), time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC), true)
 	caps, err := catalog.LoadCapabilities()
 	if err != nil {
 		t.Fatal(err)

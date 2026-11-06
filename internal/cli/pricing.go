@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/aysbg/mgw/internal/catalog"
@@ -62,14 +63,20 @@ func pricingRefresh(args []string, stdout, stderr io.Writer, deps Deps) int {
 		_, _ = fmt.Fprintf(stderr, "mgw pricing refresh: %v\n", err)
 		return ExitError
 	}
-	snap := catalog.NewSnapshot(c, *url, sum, deps.Now())
+	snap := catalog.NewSnapshot(c, *url, sum, deps.Now(), true)
 	data, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "mgw pricing refresh: %v\n", err)
 		return ExitError
 	}
-	if err := writePublicFile(*path, append(data, '\n')); err != nil {
+	data = append(data, '\n')
+	if err := writePublicFile(*path, data); err != nil {
 		_, _ = fmt.Fprintf(stderr, "mgw pricing refresh: write snapshot: %v\n", err)
+		return ExitError
+	}
+	pinData := []byte(fmt.Sprintf("%s  %s\n", catalog.Digest(data), filepath.Base(*path)))
+	if err := writePublicFile(*path+".sha256", pinData); err != nil {
+		_, _ = fmt.Fprintf(stderr, "mgw pricing refresh: write snapshot pin: %v\n", err)
 		return ExitError
 	}
 	_, _ = fmt.Fprintf(stdout, "wrote %s\ncaptured_at %s\nsource_sha256 %s\nmodels %d\n", *path, snap.CapturedAt, sum, len(snap.Models))

@@ -5,7 +5,7 @@ review even when the build is green, because not every rule is machine-checkable
 
 ## Toolchain
 
-- Go 1.27.2, pinned with the `go 1.27.2` directive in `go.mod` and in CI.
+- Go 1.27.3, pinned with the `go 1.27.3` directive in `go.mod` and in CI.
   Install from the official tarball into `/usr/local/go`; never a distribution
   package with an unknown patch level. Do not add a `toolchain` line: with the
   go directive already at that patch level, `go mod tidy` removes it and

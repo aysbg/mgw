@@ -234,6 +234,25 @@ func checkSnapshot(add func(level, name, detail string), deps Deps, path string)
 		add("FAIL", "catalog", err.Error())
 		return
 	}
+	pin, err := readFile(path + ".sha256")
+	if errors.Is(err, os.ErrNotExist) {
+		add("warn", "catalog", "unpinned: no pricing.json.sha256 next to the snapshot; run mgw pricing refresh")
+		return
+	}
+	if err != nil {
+		add("FAIL", "catalog", err.Error())
+		return
+	}
+	want, _, _ := strings.Cut(strings.TrimSpace(string(pin)), " ")
+	got := parity.SHA256Hex(data)
+	if got != want {
+		add("FAIL", "catalog", fmt.Sprintf("snapshot sha256 %s does not match the pin %s", got, want))
+		return
+	}
+	if !s.Pinned {
+		add("warn", "catalog", fmt.Sprintf("unpinned: catalog digest %s was recorded on first use; run mgw pricing refresh to review the current digest, then rerun it with --sha256 <digest>", s.SourceSHA256))
+		return
+	}
 	stale, err := s.Stale(deps.Now())
 	if err != nil {
 		add("FAIL", "catalog", err.Error())

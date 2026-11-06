@@ -155,7 +155,7 @@
     "high"
    ],
    "prohibited": [],
-   "evidence": "curated seed, P2 work order",
+   "evidence": "curated seed, P2 work order. Not a measurement of this seat: the 2026-11-05 round tested kimi-k3.1-pro, a different id in the same family. There it was competent on one allowlist implementer task, but as a reviewer it covered 5 of 19 verified findings against a 9 of 19 control at 8x the tokens. No rank change and no seat added; a second implementer task is required first. Unconfirmed ZDR and retention terms, so no customer-data use. This seat's ranks still rest on the curated seed.",
    "fixture_price": 4200000
   },
   {

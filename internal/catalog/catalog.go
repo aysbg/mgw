@@ -279,6 +279,7 @@ type Snapshot struct {
 	CapturedAt   string          `json:"captured_at"`
 	SourceURL    string          `json:"source_url"`
 	SourceSHA256 string          `json:"source_sha256"`
+	Pinned       bool            `json:"pinned"`
 	Blend        string          `json:"blend"`
 	Population   string          `json:"population"`
 	Providers    []ProviderStat  `json:"providers"`
@@ -286,10 +287,11 @@ type Snapshot struct {
 }
 
 // NewSnapshot builds a deterministic snapshot of c.
-func NewSnapshot(c *Catalog, sourceURL, sourceSHA256 string, now time.Time) Snapshot {
+func NewSnapshot(c *Catalog, sourceURL, sourceSHA256 string, now time.Time, pinned bool) Snapshot {
 	s := Snapshot{
 		CapturedAt: now.UTC().Format(time.RFC3339), SourceURL: sourceURL, SourceSHA256: sourceSHA256,
-		Blend: BlendLabel, Population: PopulationAgentCapable,
+		Pinned: pinned,
+		Blend:  BlendLabel, Population: PopulationAgentCapable,
 		Providers: []ProviderStat{}, Models: []SnapshotModel{},
 	}
 	for pid, p := range c.Providers {

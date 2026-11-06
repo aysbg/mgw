@@ -19,7 +19,7 @@ func fixtureSnapshot(t testing.TB) catalog.Snapshot {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return catalog.NewSnapshot(c, "fixture", catalog.Digest(raw), time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC))
+	return catalog.NewSnapshot(c, "fixture", catalog.Digest(raw), time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC), true)
 }
 
 // buildFixture builds a registry from the seed capabilities and the fixture

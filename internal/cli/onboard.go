@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -301,7 +302,13 @@ func connect(o *connectOpts, stdout io.Writer, deps Deps) error {
 	if err := writePublicFile(config.PricingPath(dir), snapData); err != nil {
 		return fmt.Errorf("write pricing snapshot: %w", err)
 	}
-	_, _ = fmt.Fprintf(stdout, "wrote %s\ncatalog sha256 %s", config.PricingPath(dir), snap.SourceSHA256)
+	_, _ = fmt.Fprintf(stdout, "wrote %s\n", config.PricingPath(dir))
+	pinPath := config.PricingPath(dir) + ".sha256"
+	pinData := []byte(fmt.Sprintf("%s  %s\n", catalog.Digest(snapData), filepath.Base(config.PricingPath(dir))))
+	if err := writePublicFile(pinPath, pinData); err != nil {
+		return fmt.Errorf("write pricing snapshot pin: %w", err)
+	}
+	_, _ = fmt.Fprintf(stdout, "wrote %s\ncatalog sha256 %s", pinPath, snap.SourceSHA256)
 	if o.catalogSHA == "" {
 		_, _ = fmt.Fprint(stdout, " (not pinned; pass --catalog-sha256 to pin it)")
 	}
@@ -371,7 +378,7 @@ func fetchSnapshot(deps Deps, url, pin string) (catalog.Snapshot, []byte, error)
 	if err != nil {
 		return catalog.Snapshot{}, nil, err
 	}
-	snap := catalog.NewSnapshot(c, url, sum, deps.Now())
+	snap := catalog.NewSnapshot(c, url, sum, deps.Now(), pin != "")
 	data, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		return catalog.Snapshot{}, nil, err
@@ -521,7 +528,7 @@ func (o *connectOpts) printPlan(w io.Writer, dir string, existing, next *config.
 	}
 	_, _ = fmt.Fprintf(w, "strategy %s\nprovider order %s\ndeny %s\ndata_class %s\n",
 		next.Strategy, list(next.ProviderPolicy.Order), list(next.ProviderPolicy.Deny), next.DataClass)
-	_, _ = fmt.Fprintln(w, "files: config.json (0600), credentials/<provider>.key (0600), pricing.json (0644), registry.json (0644), registry.json.sha256 (0644)")
+	_, _ = fmt.Fprintln(w, "files: config.json (0600), credentials/<provider>.key (0600), pricing.json (0644), pricing.json.sha256 (0644), registry.json (0644), registry.json.sha256 (0644)")
 	if existing != nil {
 		_, _ = fmt.Fprintln(w, "existing providers are kept")
 	}

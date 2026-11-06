@@ -3,9 +3,14 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -45,36 +50,47 @@ func withInstall(t *testing.T) Deps {
 }
 
 func TestPricingRefreshVerifiesDigestAndWrites(t *testing.T) {
-	dir := t.TempDir()
-	snap := filepath.Join(dir, "state", "pricing.json")
-	raw := fixtureBytes(t)
-	var gotURL string
-	d := testDeps()
-	d.Fetch = func(_ context.Context, url string) ([]byte, string, error) {
-		gotURL = url
-		return raw, catalog.Digest(raw), nil
-	}
-	var out, errb bytes.Buffer
-	code := Pricing([]string{"refresh", "--url", "https://example.test/api.json", "--sha256", catalog.Digest(raw), "--snapshot", snap}, &out, &errb, d)
-	if code != 0 {
-		t.Fatalf("exit %d: %s", code, errb.String())
-	}
-	if gotURL != "https://example.test/api.json" {
-		t.Fatalf("url = %q", gotURL)
-	}
-	data, err := os.ReadFile(snap)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, err := catalog.ReadSnapshot(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s.CapturedAt != "2026-10-19T12:00:00Z" || s.SourceSHA256 != catalog.Digest(raw) || s.SourceURL != "https://example.test/api.json" {
-		t.Fatalf("snapshot header: %+v", s)
-	}
-	if st, _ := os.Stat(snap); st.Mode().Perm() != 0o644 {
-		t.Fatalf("mode %v", st.Mode())
+	for _, name := range []string{"pricing.json", "custom.json"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			snap := filepath.Join(dir, "state", name)
+			raw := fixtureBytes(t)
+			var gotURL string
+			d := testDeps()
+			d.Fetch = func(_ context.Context, url string) ([]byte, string, error) {
+				gotURL = url
+				return raw, catalog.Digest(raw), nil
+			}
+			var out, errb bytes.Buffer
+			code := Pricing([]string{"refresh", "--url", "https://example.test/api.json", "--sha256", catalog.Digest(raw), "--snapshot", snap}, &out, &errb, d)
+			if code != 0 {
+				t.Fatalf("exit %d: %s", code, errb.String())
+			}
+			if gotURL != "https://example.test/api.json" {
+				t.Fatalf("url = %q", gotURL)
+			}
+			data, err := os.ReadFile(snap)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s, err := catalog.ReadSnapshot(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if s.CapturedAt != "2026-10-19T12:00:00Z" || s.SourceSHA256 != catalog.Digest(raw) || s.SourceURL != "https://example.test/api.json" {
+				t.Fatalf("snapshot header: %+v", s)
+			}
+			if st, _ := os.Stat(snap); st.Mode().Perm() != 0o644 {
+				t.Fatalf("mode %v", st.Mode())
+			}
+			if !s.Pinned || s.SourceSHA256 != independentSHA(raw) {
+				t.Fatalf("approval/source digest: %+v", s)
+			}
+			assertMode(t, snap+".sha256", 0o644)
+			if got, want := readFileT(t, snap+".sha256"), independentSHA(data)+"  "+name+"\n"; got != want {
+				t.Fatalf("pin %q, want %q", got, want)
+			}
+		})
 	}
 }
 
@@ -99,6 +115,190 @@ func TestPricingRefreshRefusesWrongOrMissingDigest(t *testing.T) {
 	}
 	if _, err := os.Stat(snap); !os.IsNotExist(err) {
 		t.Fatal("snapshot written without a pinned digest")
+	}
+}
+
+// independentSHA deliberately does not use the production digest helper.
+func independentSHA(data []byte) string {
+	return fmt.Sprintf("%x", sha256.Sum256(data))
+}
+
+func TestPricingRefreshProvenanceRejections(t *testing.T) {
+	type entry struct {
+		Mode fs.FileMode
+		Data string
+	}
+	capture := func(t *testing.T, dir string) map[string]entry {
+		t.Helper()
+		state := map[string]entry{}
+		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			var data []byte
+			if !d.IsDir() {
+				data, err = os.ReadFile(path)
+				if err != nil {
+					return err
+				}
+			}
+			state[strings.TrimPrefix(path, dir)] = entry{info.Mode(), string(data)}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return state
+	}
+	for _, existing := range []bool{false, true} {
+		for _, pin := range []string{"", strings.Repeat("0", 64)} {
+			t.Run(fmt.Sprintf("existing=%v/pin=%s", existing, pin), func(t *testing.T) {
+				dir := t.TempDir()
+				path := filepath.Join(dir, "state", "pricing.json")
+				var out, errs bytes.Buffer
+				if existing {
+					if code := Pricing([]string{"refresh", "--snapshot", path, "--sha256", independentSHA(fixtureBytes(t))}, &out, &errs, testDeps()); code != ExitOK {
+						t.Fatalf("valid refresh: %d %s", code, errs.String())
+					}
+				}
+				before := capture(t, dir)
+				out.Reset()
+				errs.Reset()
+				args := []string{"refresh", "--snapshot", path}
+				if pin != "" {
+					args = append(args, "--sha256", pin)
+				}
+				if code := Pricing(args, &out, &errs, testDeps()); code != ExitError {
+					t.Fatalf("rejected refresh: %d %s", code, errs.String())
+				}
+				if out.Len() != 0 {
+					t.Fatalf("success output on refusal: %s", out.String())
+				}
+				if after := capture(t, dir); !reflect.DeepEqual(before, after) {
+					t.Fatalf("refusal changed bytes, modes or entries:\nbefore=%v\nafter=%v", before, after)
+				}
+				if !existing && (exists(path) || exists(path+".sha256")) {
+					t.Fatal("fresh refusal wrote snapshot or pin")
+				}
+			})
+		}
+	}
+	for _, target := range []string{"snapshot", "pin"} {
+		t.Run(target+" write failure", func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "pricing.json")
+			blocked := path
+			if target == "pin" {
+				blocked += ".sha256"
+			}
+			if err := os.Mkdir(blocked, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			var out, errs bytes.Buffer
+			code := Pricing([]string{"refresh", "--snapshot", path, "--sha256", independentSHA(fixtureBytes(t))}, &out, &errs, testDeps())
+			if code != ExitError || !strings.Contains(errs.String(), "write snapshot") || !strings.Contains(errs.String(), blocked) || out.Len() != 0 {
+				t.Fatalf("write failure: %d stdout=%s stderr=%s", code, out.String(), errs.String())
+			}
+			if target == "pin" && !strings.Contains(errs.String(), "pin") {
+				t.Fatal("missing pin-write error")
+			}
+		})
+	}
+}
+
+func TestDoctorCatalogProvenancePrecedence(t *testing.T) {
+	raw := fixtureBytes(t)
+	c, err := catalog.Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := func(approved bool, days int) []byte {
+		s := catalog.NewSnapshot(c, "https://example.test/api.json", independentSHA(raw), fixedNow.Add(-time.Duration(days)*24*time.Hour), approved)
+		data, err := json.Marshal(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return append(data, '\n')
+	}
+	firstUse := "unpinned: catalog digest " + independentSHA(raw) + " was recorded on first use; run mgw pricing refresh to review the current digest, then rerun it with --sha256 <digest>"
+	fresh := snapshot(true, 0)
+	oldUnapproved := snapshot(false, 31)
+	// A decodable one-byte mutation must fail integrity even before approval/age.
+	tampered := bytes.Replace(oldUnapproved, []byte("https"), []byte("httpx"), 1)
+	if bytes.Equal(tampered, oldUnapproved) {
+		t.Fatal("missing tamper target")
+	}
+	if _, err := catalog.ReadSnapshot(tampered); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name     string
+		data     []byte
+		pin      string
+		level    string
+		detail   string
+		contains string
+	}{
+		{name: "missing", level: "warn"},
+		{name: "snapshot directory", level: "FAIL", contains: "is a directory"},
+		{name: "invalid JSON without pin", data: []byte(`not json`), level: "FAIL", contains: "snapshot: decode:"},
+		{name: "bad timestamp", data: []byte(`{"captured_at":"yesterday"}`), level: "FAIL", contains: "snapshot: captured_at:"},
+		{name: "missing pin masks approval and age", data: oldUnapproved, level: "warn", detail: "unpinned: no pricing.json.sha256 next to the snapshot; run mgw pricing refresh"},
+		{name: "pin directory", data: fresh, pin: "directory", level: "FAIL", contains: "is a directory"},
+		{name: "mismatch masks approval and age", data: tampered, pin: independentSHA(oldUnapproved), level: "FAIL", detail: "snapshot sha256 " + independentSHA(tampered) + " does not match the pin " + independentSHA(oldUnapproved)},
+		{name: "malformed digest", data: fresh, pin: "not-a-sha256", level: "FAIL", detail: "snapshot sha256 " + independentSHA(fresh) + " does not match the pin not-a-sha256"},
+		{name: "false approval masks age", data: oldUnapproved, pin: "matching", level: "warn", detail: firstUse},
+		{name: "approved exactly 30 days", data: snapshot(true, 30), pin: "matching", level: "ok", detail: "snapshot captured_at " + fixedNow.Add(-30*24*time.Hour).Format(time.RFC3339)},
+		{name: "approved 31 days", data: snapshot(true, 31), pin: "matching", level: "warn", detail: fmt.Sprintf("snapshot captured_at %s is 31 days old (limit 30); run `mgw pricing refresh`", fixedNow.Add(-31*24*time.Hour).Format(time.RFC3339))},
+		{name: "approved fresh", data: fresh, pin: "matching", level: "ok", detail: "snapshot captured_at " + fixedNow.Format(time.RFC3339)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "pricing.json")
+			if tc.name == "snapshot directory" {
+				if err := os.Mkdir(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			} else if tc.data != nil {
+				if err := os.WriteFile(path, tc.data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.pin == "directory" {
+				if err := os.Mkdir(path+".sha256", 0o700); err != nil {
+					t.Fatal(err)
+				}
+			} else if tc.pin != "" {
+				pin := tc.pin
+				if pin == "matching" {
+					pin = independentSHA(tc.data)
+				}
+				if err := os.WriteFile(path+".sha256", []byte(" \n"+pin+"  pricing.json\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var rows []doctorCheck
+			checkSnapshot(func(level, name, detail string) { rows = append(rows, doctorCheck{level, name, detail}) }, testDeps(), path)
+			if len(rows) != 1 || rows[0].Name != "catalog" || rows[0].Level != tc.level {
+				t.Fatalf("rows %+v", rows)
+			}
+			want := tc.detail
+			if tc.name == "missing" {
+				want = "no pricing snapshot at " + path + "; run `mgw pricing refresh`"
+			}
+			if tc.contains != "" {
+				if !strings.Contains(rows[0].Detail, tc.contains) {
+					t.Fatalf("detail %q lacks %q", rows[0].Detail, tc.contains)
+				}
+				if strings.Contains(tc.name, "directory") && !strings.Contains(rows[0].Detail, path) {
+					t.Fatalf("read error lacks path: %+v", rows)
+				}
+			} else if rows[0].Detail != want {
+				t.Fatalf("detail %q, want %q", rows[0].Detail, want)
+			}
+		})
 	}
 }
 

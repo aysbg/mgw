@@ -3,7 +3,9 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,13 +49,17 @@ func writeSnapshot(t *testing.T, dir string, captured time.Time) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := catalog.NewSnapshot(c, "fixture", catalog.Digest(raw), captured)
+	s := catalog.NewSnapshot(c, "fixture", catalog.Digest(raw), captured, true)
 	b, err := json.Marshal(s)
 	if err != nil {
 		t.Fatal(err)
 	}
 	p := filepath.Join(dir, "pricing.json")
 	if err := os.WriteFile(p, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pin := fmt.Sprintf("%x  %s\n", sha256.Sum256(b), filepath.Base(p))
+	if err := os.WriteFile(p+".sha256", []byte(pin), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return p
